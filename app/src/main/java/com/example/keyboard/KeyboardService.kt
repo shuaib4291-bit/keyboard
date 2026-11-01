@@ -99,7 +99,7 @@ class KeyboardService : InputMethodService() {
 
     override fun onCreateInputView(): View {
         val screenH = resources.displayMetrics.heightPixels
-        val h = maxOf((screenH * 0.32f).toInt(), dp(290))
+        val h = maxOf((screenH * 0.32f).toInt(), dp(270))
         root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setBackgroundColor(BG)
@@ -207,21 +207,16 @@ class KeyboardService : InputMethodService() {
         repeater = null
     }
 
+    private fun nextLang() {
+        val codes = LANGS.keys.toList()
+        lang = codes[(codes.indexOf(lang) + 1) % codes.size]
+        shift = false
+        render()
+    }
+
     private fun render() {
         root.removeAllViews()
         val d = LANGS[lang]!!
-
-        // ভাষার ট্যাব
-        val tabs = row(1.1f)
-        LANGS.forEach { (code, l) ->
-            tabs.addView(key(l.name, 1f, fn = true, active = code == lang, size = 19f) {
-                lang = code
-                shift = false
-                num = false
-                render()
-            })
-        }
-        root.addView(tabs)
 
         if (num) {
             addRow(d.digits.map { c -> key(c) { type(c) } })
@@ -251,6 +246,7 @@ class KeyboardService : InputMethodService() {
             }
         }
 
+        // নিচের সারি: ১২৩ | ভাষা বাটন (বড়, নীল) | space | . | enter
         val dot = if (lang == "bn") "।" else "."
         addRow(
             listOf(
@@ -259,7 +255,8 @@ class KeyboardService : InputMethodService() {
                     render()
                 },
                 key(",") { type(",") },
-                key(d.name, 5f, size = 18f) { type(" ") },
+                key("🌐 " + d.name, 2.6f, fn = true, active = true, size = 18f) { nextLang() },
+                key("space", 3f, size = 16f) { type(" ") },
                 key(dot) { type(dot) },
                 key("↵", 1.4f, fn = true) { enter() }
             )
