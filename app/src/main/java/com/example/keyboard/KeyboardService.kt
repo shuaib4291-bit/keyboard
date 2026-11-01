@@ -99,7 +99,7 @@ class KeyboardService : InputMethodService() {
 
     override fun onCreateInputView(): View {
         val screenH = resources.displayMetrics.heightPixels
-        val h = maxOf((screenH * 0.32f).toInt(), dp(270))
+        val h = maxOf((screenH * 0.25f).toInt(), dp(210))
         root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setBackgroundColor(BG)
@@ -138,7 +138,7 @@ class KeyboardService : InputMethodService() {
         orientation = LinearLayout.HORIZONTAL
         layoutParams = LinearLayout.LayoutParams(
             ViewGroup.LayoutParams.MATCH_PARENT, 0, w
-        ).apply { setMargins(0, dp(3), 0, dp(3)) }
+        ).apply { setMargins(0, dp(2), 0, dp(2)) }
     }
 
     private fun addRow(keys: List<View>) {
