@@ -134,10 +134,25 @@ class KeyboardService : InputMethodService() {
         return root
     }
 
-    override fun onStartInputView(info: EditorInfo?, restarting: Boolean) {
+        override fun onStartInputView(info: EditorInfo?, restarting: Boolean) {
         super.onStartInputView(info, restarting)
         shift = false
         num = false
+
+        val t = info?.inputType ?: 0
+        val cls = t and InputType.TYPE_MASK_CLASS
+        val v = t and InputType.TYPE_MASK_VARIATION
+        val textPass = cls == InputType.TYPE_CLASS_TEXT && (
+                v == InputType.TYPE_TEXT_VARIATION_PASSWORD ||
+                v == InputType.TYPE_TEXT_VARIATION_VISIBLE_PASSWORD ||
+                v == InputType.TYPE_TEXT_VARIATION_WEB_PASSWORD ||
+                v == InputType.TYPE_TEXT_VARIATION_EMAIL_ADDRESS ||
+                v == InputType.TYPE_TEXT_VARIATION_URI)
+        val numPass = cls == InputType.TYPE_CLASS_NUMBER || cls == InputType.TYPE_CLASS_PHONE
+
+        if (textPass || numPass) lang = "en"
+        if (numPass) num = true
+
         if (::root.isInitialized) {
             render()
             updateSuggestions()
