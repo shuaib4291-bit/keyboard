@@ -109,6 +109,8 @@ class KeyboardService : InputMethodService() {
     // ভয়েস
     private var recognizer: SpeechRecognizer? = null
     private var listening = false
+    private var lastVoice = ""
+    private var lastVoiceAt = 0L
 
     // সোলায়মান লিপি ফন্ট: app/src/main/assets/SolaimanLipi.ttf
     private val bnFont: Typeface? by lazy {
@@ -403,12 +405,17 @@ class KeyboardService : InputMethodService() {
                 }
             }
 
-            override fun onResults(results: Bundle?) {
+                        override fun onResults(results: Bundle?) {
+                if (!listening) return
                 listening = false
                 val text = results
                     ?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
                     ?.firstOrNull()
-                if (!text.isNullOrBlank()) {
+                val now = System.currentTimeMillis()
+                val dup = text == lastVoice && now - lastVoiceAt < 3000
+                if (!text.isNullOrBlank() && !dup) {
+                    lastVoice = text
+                    lastVoiceAt = now
                     currentInputConnection?.commitText("$text ", 1)
                 }
                 render()
