@@ -1,12 +1,19 @@
 package com.example.keyboard
 
+import android.Manifest
+import android.content.Intent
+import android.content.pm.PackageManager
 import android.graphics.Color
 import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
 import android.graphics.drawable.StateListDrawable
 import android.inputmethodservice.InputMethodService
+import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
+import android.speech.RecognitionListener
+import android.speech.RecognizerIntent
+import android.speech.SpeechRecognizer
 import android.text.InputType
 import android.view.Gravity
 import android.view.HapticFeedbackConstants
@@ -17,6 +24,7 @@ import android.view.ViewGroup
 import android.view.inputmethod.EditorInfo
 import android.widget.LinearLayout
 import android.widget.TextView
+import android.widget.Toast
 
 private val BG = Color.parseColor("#2A2A3C")
 private val KEY = Color.parseColor("#565A73")
@@ -31,6 +39,7 @@ private fun r(s: String) = s.split(" ")
 private class Lang(
     val name: String,
     val lbl: String,
+    val voice: String,
     val n: List<List<String>>,
     val s: List<List<String>>,
     val digits: List<String>
@@ -47,10 +56,10 @@ private val enS = enN.map { row ->
 
 private val LANGS = linkedMapOf(
     "en" to Lang(
-        "English", "123", enN, enS, r("1 2 3 4 5 6 7 8 9 0")
+        "English", "123", "en-US", enN, enS, r("1 2 3 4 5 6 7 8 9 0")
     ),
     "bn" to Lang(
-        "বাংলা", "১২৩",
+        "বাংলা", "১২৩", "bn-BD",
         listOf(
             r("ক খ গ ঘ ঙ চ ছ জ ঝ ঞ"),
             r("ট ঠ ড ঢ ণ ত থ দ ধ ন"),
@@ -65,7 +74,7 @@ private val LANGS = linkedMapOf(
         r("১ ২ ৩ ৪ ৫ ৬ ৭ ৮ ৯ ০")
     ),
     "ar" to Lang(
-        "العربية", "١٢٣",
+        "العربية", "١٢٣", "ar-SA",
         listOf(
             r("ض ص ث ق ف غ ع ه خ ح"),
             r("ش س ي ب ل ا ت ن م"),
@@ -97,10 +106,14 @@ class KeyboardService : InputMethodService() {
     private val handler = Handler(Looper.getMainLooper())
     private var repeater: Runnable? = null
 
-    // সোলায়মান লিপি ফন্ট: app/src/main/assets/fonts/SolaimanLipi.ttf
+    // ভয়েস
+    private var recognizer: SpeechRecognizer? = null
+    private var listening = false
+
+    // সোলায়মান লিপি ফন্ট: app/src/main/assets/SolaimanLipi.ttf
     private val bnFont: Typeface? by lazy {
         try {
-            Typeface.createFromAsset(assets, "fonts/SolaimanLipi.ttf")
+            Typeface.createFromAsset(assets, "SolaimanLipi.ttf")
         } catch (e: Exception) {
             null
         }
@@ -148,6 +161,7 @@ class KeyboardService : InputMethodService() {
         super.onStartInputView(info, restarting)
         shift = false
         num = false
+        listening = false
 
         // পাসওয়ার্ড/ইমেইল/নম্বরের ঘরে নিজে থেকে ইংরেজি
         val t = info?.inputType ?: 0
@@ -183,7 +197,15 @@ class KeyboardService : InputMethodService() {
 
     override fun onFinishInputView(finishingInput: Boolean) {
         stopRepeat()
+        recognizer?.cancel()
+        listening = false
         super.onFinishInputView(finishingInput)
+    }
+
+    override fun onDestroy() {
+        recognizer?.destroy()
+        recognizer = null
+        super.onDestroy()
     }
 
     // ---------- UI ----------
@@ -312,22 +334,96 @@ class KeyboardService : InputMethodService() {
             }
         }
 
-        // নিচের সারি: ১২৩ | , | ভাষা বাটন | space | . | ↵ | ✓
+        // নিচের সারি: ১২৩ | , | 🎤 | ভাষা বাটন | space | . | ↵ | ✓
         val dot = if (lang == "bn") "।" else "."
         addRow(
             listOf(
-                key(if (num) "ABC" else d.lbl, 1.4f, fn = true) {
+                key(if (num) "ABC" else d.lbl, 1.3f, fn = true) {
                     num = !num
                     render()
                 },
                 key(",") { type(",") },
-                key("🌐 " + d.name, 2.6f, fn = true, active = true, size = 16f) { nextLang() },
-                key("space", 2.4f, size = 14f) { type(" ") },
+                key(if (listening) "⏹" else "🎤", 1.2f, fn = true, active = listening, size = 18f) {
+                    toggleVoice()
+                },
+                key("🌐 " + d.name, 2.4f, fn = true, active = !listening, size = 16f) { nextLang() },
+                key("space", 2.0f, size = 14f) { type(" ") },
                 key(dot) { type(dot) },
-                key("↵", 1.2f, fn = true) { enter() },
-                key("✓", 1.2f, fn = true, size = 22f) { confirm() }
+                key("↵", 1.1f, fn = true) { enter() },
+                key("✓", 1.1f, fn = true, size = 22f) { confirm() }
             )
         )
+    }
+
+    // ---------- ভয়েস টাইপিং ----------
+
+    private fun toast(s: String) = Toast.makeText(this, s, Toast.LENGTH_SHORT).show()
+
+    private fun hasMic() =
+        checkCallingOrSelfPermission(Manifest.permission.RECORD_AUDIO) ==
+                PackageManager.PERMISSION_GRANTED
+
+    private fun toggleVoice() {
+        if (isPasswordField()) return
+        if (listening) {
+            recognizer?.stopListening()
+            return
+        }
+        if (!hasMic()) {
+            toast("মাইক্রোফোনের অনুমতি দিন")
+            startActivity(
+                Intent(this, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            )
+            return
+        }
+        if (!SpeechRecognizer.isRecognitionAvailable(this)) {
+            toast("এই ফোনে ভয়েস টাইপিং সেবা পাওয়া যায়নি")
+            return
+        }
+        val sr = recognizer ?: SpeechRecognizer.createSpeechRecognizer(this).also { recognizer = it }
+        sr.setRecognitionListener(object : RecognitionListener {
+            override fun onReadyForSpeech(params: Bundle?) {}
+            override fun onBeginningOfSpeech() {}
+            override fun onRmsChanged(rmsdB: Float) {}
+            override fun onBufferReceived(buffer: ByteArray?) {}
+            override fun onEndOfSpeech() {}
+            override fun onPartialResults(partialResults: Bundle?) {}
+            override fun onEvent(eventType: Int, params: Bundle?) {}
+
+            override fun onError(error: Int) {
+                listening = false
+                render()
+                when (error) {
+                    SpeechRecognizer.ERROR_NO_MATCH,
+                    SpeechRecognizer.ERROR_SPEECH_TIMEOUT -> toast("কিছু শোনা যায়নি, আবার চেষ্টা করুন")
+                    SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS -> toast("মাইক্রোফোনের অনুমতি দিন")
+                    SpeechRecognizer.ERROR_NETWORK,
+                    SpeechRecognizer.ERROR_NETWORK_TIMEOUT -> toast("ইন্টারনেট সংযোগ দেখুন")
+                    else -> toast("ভয়েস ত্রুটি ($error)")
+                }
+            }
+
+            override fun onResults(results: Bundle?) {
+                listening = false
+                val text = results
+                    ?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
+                    ?.firstOrNull()
+                if (!text.isNullOrBlank()) {
+                    currentInputConnection?.commitText("$text ", 1)
+                }
+                render()
+                updateSuggestions()
+            }
+        })
+        val i = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
+            putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
+            putExtra(RecognizerIntent.EXTRA_LANGUAGE, LANGS[lang]!!.voice)
+            putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, false)
+            putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 1)
+        }
+        listening = true
+        render()
+        sr.startListening(i)
     }
 
     // ---------- শব্দ সাজেশন ----------
@@ -472,7 +568,8 @@ class KeyboardService : InputMethodService() {
         }
     }
 
-    private fun confirm() {
+
+private fun confirm() {
         val ic = currentInputConnection ?: return
         learn(currentWord())
         val t = currentInputEditorInfo?.inputType ?: 0
