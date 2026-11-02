@@ -409,21 +409,42 @@ class KeyboardService : InputMethodService() {
 
     // ---------- ইনপুট ----------
 
+        private fun isPasswordField(): Boolean {
+        val t = currentInputEditorInfo?.inputType ?: return false
+        val cls = t and InputType.TYPE_MASK_CLASS
+        val v = t and InputType.TYPE_MASK_VARIATION
+        return when (cls) {
+            InputType.TYPE_CLASS_TEXT ->
+                v == InputType.TYPE_TEXT_VARIATION_PASSWORD ||
+                v == InputType.TYPE_TEXT_VARIATION_VISIBLE_PASSWORD ||
+                v == InputType.TYPE_TEXT_VARIATION_WEB_PASSWORD
+            InputType.TYPE_CLASS_NUMBER -> v == InputType.TYPE_NUMBER_VARIATION_PASSWORD
+            else -> false
+        }
+    }
+
     private fun type(s: String) {
         val ic = currentInputConnection ?: return
         if (s.isNotEmpty() && !isWordChar(s[0])) learn(currentWord())
-        ic.commitText(s, 1)
+        if (s.length == 1 && s[0] in '0'..'9' && isPasswordField()) {
+            sendDownUpKeyEvents(KeyEvent.KEYCODE_0 + (s[0] - '0'))
+        } else {
+            ic.commitText(s, 1)
+        }
         updateSuggestions()
     }
 
     private fun backspace() {
         val ic = currentInputConnection ?: return
-        val sel = ic.getSelectedText(0)
-        if (sel.isNullOrEmpty()) ic.deleteSurroundingText(1, 0)
-        else ic.commitText("", 1)
+        if (isPasswordField()) {
+            sendDownUpKeyEvents(KeyEvent.KEYCODE_DEL)
+        } else {
+            val sel = ic.getSelectedText(0)
+            if (sel.isNullOrEmpty()) ic.deleteSurroundingText(1, 0)
+            else ic.commitText("", 1)
+        }
         updateSuggestions()
     }
-
            private fun enter() {
         val ic = currentInputConnection ?: return
         learn(currentWord())
