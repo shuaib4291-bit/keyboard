@@ -295,9 +295,10 @@ class KeyboardService : InputMethodService() {
                 },
                 key(",") { type(",") },
                 key("🌐 " + d.name, 2.6f, fn = true, active = true, size = 16f) { nextLang() },
-                key("space", 3f, size = 14f) { type(" ") },
+                                key("space", 2.4f, size = 14f) { type(" ") },
                 key(dot) { type(dot) },
-                key("↵", 1.4f, fn = true) { enter() }
+                key("↵", 1.2f, fn = true) { enter() },
+                key("✓", 1.2f, fn = true, size = 22f) { confirm() }
             )
         )
     }
@@ -419,6 +420,16 @@ class KeyboardService : InputMethodService() {
         } else {
             ic.sendKeyEvent(KeyEvent(KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_ENTER))
             ic.sendKeyEvent(KeyEvent(KeyEvent.ACTION_UP, KeyEvent.KEYCODE_ENTER))
+    private fun confirm() {
+        val ic = currentInputConnection ?: return
+        learn(currentWord())
+        val ei = currentInputEditorInfo
+        val action = ei?.imeOptions?.and(EditorInfo.IME_MASK_ACTION) ?: EditorInfo.IME_ACTION_NONE
+        if (action != EditorInfo.IME_ACTION_NONE && action != EditorInfo.IME_ACTION_UNSPECIFIED) {
+            ic.performEditorAction(action)
+        }
+        requestHideSelf(0)
+    }
         }
     }
 }
