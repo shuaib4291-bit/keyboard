@@ -1,8 +1,10 @@
 package com.example.keyboard
 
+import android.Manifest
 import android.app.Activity
 import android.content.Intent
 import android.graphics.Color
+import android.os.Build
 import android.os.Bundle
 import android.provider.Settings
 import android.view.inputmethod.InputMethodManager
@@ -46,6 +48,14 @@ class MainActivity : Activity() {
             setOnClickListener {
                 (getSystemService(INPUT_METHOD_SERVICE) as InputMethodManager)
                     .showInputMethodPicker()
+            }
+        })
+        layout.addView(Button(this).apply {
+            text = "৩. ভয়েসের জন্য মাইক্রোফোনের অনুমতি দিন"
+            setOnClickListener {
+                if (Build.VERSION.SDK_INT >= 23) {
+                    requestPermissions(arrayOf(Manifest.permission.RECORD_AUDIO), 1)
+                }
             }
         })
 
