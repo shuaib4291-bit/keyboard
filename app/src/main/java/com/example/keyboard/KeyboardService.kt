@@ -1,6 +1,7 @@
 package com.example.keyboard
 
 import android.graphics.Color
+import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
 import android.graphics.drawable.StateListDrawable
 import android.inputmethodservice.InputMethodService
@@ -75,7 +76,7 @@ private val LANGS = linkedMapOf(
             r("َ ُ ِ ً ٌ ٍ ّ ْ ـ"),
             r("⇧ أ إ آ پ چ گ ژ ⌫")
         ),
-        r(" ١ ٢ ٣ ٤ ٥ ٦ ٧ ٨ ٩ ٠")
+        r("١ ٢ ٣ ٤ ٥ ٦ ٧ ٨ ٩ ٠")
     )
 )
 
@@ -95,6 +96,15 @@ class KeyboardService : InputMethodService() {
     private var num = false
     private val handler = Handler(Looper.getMainLooper())
     private var repeater: Runnable? = null
+
+    // সোলায়মান লিপি ফন্ট: app/src/main/assets/fonts/SolaimanLipi.ttf
+    private val bnFont: Typeface? by lazy {
+        try {
+            Typeface.createFromAsset(assets, "fonts/SolaimanLipi.ttf")
+        } catch (e: Exception) {
+            null
+        }
+    }
 
     private val prefs by lazy { getSharedPreferences("kb", MODE_PRIVATE) }
     private val dicts = HashMap<String, List<String>>()
@@ -134,11 +144,12 @@ class KeyboardService : InputMethodService() {
         return root
     }
 
-        override fun onStartInputView(info: EditorInfo?, restarting: Boolean) {
+    override fun onStartInputView(info: EditorInfo?, restarting: Boolean) {
         super.onStartInputView(info, restarting)
         shift = false
         num = false
 
+        // পাসওয়ার্ড/ইমেইল/নম্বরের ঘরে নিজে থেকে ইংরেজি
         val t = info?.inputType ?: 0
         val cls = t and InputType.TYPE_MASK_CLASS
         val v = t and InputType.TYPE_MASK_VARIATION
@@ -223,6 +234,7 @@ class KeyboardService : InputMethodService() {
         t.text = text
         t.gravity = Gravity.CENTER
         t.textSize = size
+        if (lang == "bn") bnFont?.let { t.typeface = it }
         t.setTextColor(if (active) TXT_ACC else TXT)
         t.background = bg(if (active) ACC else if (fn) KEY2 else KEY)
         t.layoutParams = LinearLayout.LayoutParams(
@@ -300,7 +312,7 @@ class KeyboardService : InputMethodService() {
             }
         }
 
-        // নিচের সারি: ১২৩ | , | ভাষা বাটন | space | . | enter
+        // নিচের সারি: ১২৩ | , | ভাষা বাটন | space | . | ↵ | ✓
         val dot = if (lang == "bn") "।" else "."
         addRow(
             listOf(
@@ -310,7 +322,7 @@ class KeyboardService : InputMethodService() {
                 },
                 key(",") { type(",") },
                 key("🌐 " + d.name, 2.6f, fn = true, active = true, size = 16f) { nextLang() },
-                                key("space", 2.4f, size = 14f) { type(" ") },
+                key("space", 2.4f, size = 14f) { type(" ") },
                 key(dot) { type(dot) },
                 key("↵", 1.2f, fn = true) { enter() },
                 key("✓", 1.2f, fn = true, size = 22f) { confirm() }
@@ -388,6 +400,7 @@ class KeyboardService : InputMethodService() {
             t.text = shown
             t.gravity = Gravity.CENTER
             t.textSize = 18f
+            if (lang == "bn") bnFont?.let { t.typeface = it }
             t.maxLines = 1
             t.setTextColor(TXT)
             t.background = bg(KEY2)
@@ -409,7 +422,7 @@ class KeyboardService : InputMethodService() {
 
     // ---------- ইনপুট ----------
 
-        private fun isPasswordField(): Boolean {
+    private fun isPasswordField(): Boolean {
         val t = currentInputEditorInfo?.inputType ?: return false
         val cls = t and InputType.TYPE_MASK_CLASS
         val v = t and InputType.TYPE_MASK_VARIATION
@@ -445,7 +458,8 @@ class KeyboardService : InputMethodService() {
         }
         updateSuggestions()
     }
-           private fun enter() {
+
+    private fun enter() {
         val ic = currentInputConnection ?: return
         learn(currentWord())
         val opts = currentInputEditorInfo?.imeOptions ?: 0
@@ -472,4 +486,4 @@ class KeyboardService : InputMethodService() {
         }
         requestHideSelf(0)
     }
-} 
+}
