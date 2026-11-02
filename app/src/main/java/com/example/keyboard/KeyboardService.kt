@@ -1,6 +1,9 @@
 package com.example.keyboard
 
 import android.Manifest
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.graphics.Color
@@ -491,28 +494,75 @@ class KeyboardService : InputMethodService() {
         return out.toList()
     }
 
-    private fun updateSuggestions() {
+        private fun updateSuggestions() {
         if (!::bar.isInitialized) return
         bar.removeAllViews()
-        if (!suggestionsAllowed()) return
-        val w = currentWord()
-        if (w.isEmpty()) return
-        suggest(w).forEach { s ->
-            val shown = if (w[0].isUpperCase()) s.replaceFirstChar { it.uppercase() } else s
-            val t = TextView(this)
-            t.text = shown
-            t.gravity = Gravity.CENTER
-            t.textSize = 18f
-            if (lang == "bn") bnFont?.let { t.typeface = it }
-            t.maxLines = 1
-            t.setTextColor(TXT)
-            t.background = bg(KEY2)
-            t.layoutParams = LinearLayout.LayoutParams(
-                0, ViewGroup.LayoutParams.MATCH_PARENT, 1f
-            ).apply { setMargins(dp(2), 0, dp(2), dp(2)) }
-            t.setOnClickListener { pick(w, shown) }
-            bar.addView(t)
+        if (isPasswordField()) return
+        val w = if (suggestionsAllowed()) currentWord() else ""
+        val list = if (w.isEmpty()) emptyList() else suggest(w)
+        if (list.isEmpty()) {
+            showTools()
+            return
         }
+        list.forEach { s ->
+            val shown = if (w[0].isUpperCase()) s.replaceFirstChar { it.uppercase() } else s
+            bar.addView(chip(shown, 18f) { pick(w, shown) })
+        }
+    }
+
+    private fun chip(text: String, size: Float, action: () -> Unit): TextView {
+        val t = TextView(this)
+        t.text = text
+        t.gravity = Gravity.CENTER
+        t.textSize = size
+        if (lang == "bn") bnFont?.let { t.typeface = it }
+        t.maxLines = 1
+        t.setTextColor(TXT)
+        t.background = bg(KEY2)
+        t.layoutParams = LinearLayout.LayoutParams(
+            0, ViewGroup.LayoutParams.MATCH_PARENT, 1f
+        ).apply { setMargins(dp(2), 0, dp(2), dp(2)) }
+        t.setOnClickListener { action() }
+        return t
+    }
+
+    private fun showTools() {
+        bar.addView(chip("সব নির্বাচন", 14f) { doSelectAll() })
+        bar.addView(chip("কাট", 15f) { doCopy(true) })
+        bar.addView(chip("কপি", 15f) { doCopy(false) })
+        bar.addView(chip("পেস্ট", 15f) { doPaste() })
+    }
+
+    private fun clipboard() = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+
+    private fun doSelectAll() {
+        currentInputConnection?.performContextMenuAction(android.R.id.selectAll)
+    }
+
+    private fun doCopy(cut: Boolean) {
+        val ic = currentInputConnection ?: return
+        val sel = ic.getSelectedText(0)
+        if (sel.isNullOrEmpty()) {
+            toast("আগে লেখা নির্বাচন করুন")
+            return
+        }
+        clipboard().setPrimaryClip(ClipData.newPlainText("kb", sel))
+        if (cut) ic.commitText("", 1)
+        toast(if (cut) "কাট হয়েছে" else "কপি হয়েছে")
+        updateSuggestions()
+    }
+
+    private fun doPaste() {
+        val ic = currentInputConnection ?: return
+        val clip = clipboard().primaryClip
+        val text = if (clip != null && clip.itemCount > 0)
+            clip.getItemAt(0).coerceToText(this)?.toString() else null
+        if (text.isNullOrEmpty()) {
+            toast("ক্লিপবোর্ড খালি")
+            return
+        }
+        ic.commitText(text, 1)
+        updateSuggestions()
     }
 
     private fun pick(w: String, s: String) {
