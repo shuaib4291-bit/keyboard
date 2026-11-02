@@ -409,7 +409,7 @@ class KeyboardService : InputMethodService() {
         updateSuggestions()
     }
 
-    private fun enter() {
+        private fun enter() {
         val ic = currentInputConnection ?: return
         learn(currentWord())
         val ei = currentInputEditorInfo
@@ -420,6 +420,9 @@ class KeyboardService : InputMethodService() {
         } else {
             ic.sendKeyEvent(KeyEvent(KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_ENTER))
             ic.sendKeyEvent(KeyEvent(KeyEvent.ACTION_UP, KeyEvent.KEYCODE_ENTER))
+        }
+    }
+
     private fun confirm() {
         val ic = currentInputConnection ?: return
         learn(currentWord())
@@ -429,7 +432,5 @@ class KeyboardService : InputMethodService() {
             ic.performEditorAction(action)
         }
         requestHideSelf(0)
-    }
-        }
     }
 }
