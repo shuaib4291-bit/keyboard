@@ -6,6 +6,7 @@ import android.graphics.drawable.StateListDrawable
 import android.inputmethodservice.InputMethodService
 import android.os.Handler
 import android.os.Looper
+import android.text.InputType
 import android.view.Gravity
 import android.view.HapticFeedbackConstants
 import android.view.KeyEvent
@@ -87,11 +88,17 @@ private val SYM = listOf(
 class KeyboardService : InputMethodService() {
 
     private lateinit var root: LinearLayout
+    private lateinit var bar: LinearLayout
+    private lateinit var keysBox: LinearLayout
     private var lang = "en"
     private var shift = false
     private var num = false
     private val handler = Handler(Looper.getMainLooper())
     private var repeater: Runnable? = null
+
+    private val prefs by lazy { getSharedPreferences("kb", MODE_PRIVATE) }
+    private val dicts = HashMap<String, List<String>>()
+    private val learned = HashMap<String, MutableSet<String>>()
 
     private fun dp(x: Int) = (x * resources.displayMetrics.density).toInt()
 
@@ -99,13 +106,30 @@ class KeyboardService : InputMethodService() {
 
     override fun onCreateInputView(): View {
         val screenH = resources.displayMetrics.heightPixels
-        val h = maxOf((screenH * 0.18f).toInt(), dp(150))
+        val keysH = maxOf((screenH * 0.20f).toInt(), dp(170))
         root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setBackgroundColor(BG)
-            setPadding(dp(4), dp(3), dp(4), dp(4))
-            layoutParams = ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, h)
+            layoutParams = ViewGroup.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, keysH + dp(40)
+            )
         }
+        bar = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            setPadding(dp(4), dp(4), dp(4), 0)
+            layoutParams = LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, dp(40)
+            )
+        }
+        keysBox = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(4), dp(3), dp(4), dp(4))
+            layoutParams = LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f
+            )
+        }
+        root.addView(bar)
+        root.addView(keysBox)
         render()
         return root
     }
@@ -114,7 +138,21 @@ class KeyboardService : InputMethodService() {
         super.onStartInputView(info, restarting)
         shift = false
         num = false
-        if (::root.isInitialized) render()
+        if (::root.isInitialized) {
+            render()
+            updateSuggestions()
+        }
+    }
+
+    override fun onUpdateSelection(
+        oldSelStart: Int, oldSelEnd: Int,
+        newSelStart: Int, newSelEnd: Int,
+        candidatesStart: Int, candidatesEnd: Int
+    ) {
+        super.onUpdateSelection(
+            oldSelStart, oldSelEnd, newSelStart, newSelEnd, candidatesStart, candidatesEnd
+        )
+        updateSuggestions()
     }
 
     override fun onFinishInputView(finishingInput: Boolean) {
@@ -144,7 +182,7 @@ class KeyboardService : InputMethodService() {
     private fun addRow(keys: List<View>) {
         val rw = row(1f)
         keys.forEach { rw.addView(it) }
-        root.addView(rw)
+        keysBox.addView(rw)
     }
 
     private fun label(c: String): String {
@@ -162,7 +200,7 @@ class KeyboardService : InputMethodService() {
         weight: Float = 1f,
         fn: Boolean = false,
         active: Boolean = false,
-        size: Float = 18f,
+        size: Float = 19f,
         repeat: Boolean = false,
         action: () -> Unit
     ): TextView {
@@ -212,10 +250,11 @@ class KeyboardService : InputMethodService() {
         lang = codes[(codes.indexOf(lang) + 1) % codes.size]
         shift = false
         render()
+        updateSuggestions()
     }
 
     private fun render() {
-        root.removeAllViews()
+        keysBox.removeAllViews()
         val d = LANGS[lang]!!
 
         if (num) {
@@ -246,7 +285,7 @@ class KeyboardService : InputMethodService() {
             }
         }
 
-        // নিচের সারি: ১২৩ | ভাষা বাটন (বড়, নীল) | space | . | enter
+        // নিচের সারি: ১২৩ | , | ভাষা বাটন | space | . | enter
         val dot = if (lang == "bn") "।" else "."
         addRow(
             listOf(
@@ -255,18 +294,110 @@ class KeyboardService : InputMethodService() {
                     render()
                 },
                 key(",") { type(",") },
-                key("🌐 " + d.name, 2.6f, fn = true, active = true, size = 18f) { nextLang() },
-                key("space", 3f, size = 16f) { type(" ") },
+                key("🌐 " + d.name, 2.6f, fn = true, active = true, size = 16f) { nextLang() },
+                key("space", 3f, size = 14f) { type(" ") },
                 key(dot) { type(dot) },
                 key("↵", 1.4f, fn = true) { enter() }
             )
         )
     }
 
+    // ---------- শব্দ সাজেশন ----------
+
+    private fun suggestionsAllowed(): Boolean {
+        val t = currentInputEditorInfo?.inputType ?: return false
+        if ((t and InputType.TYPE_MASK_CLASS) != InputType.TYPE_CLASS_TEXT) return false
+        val v = t and InputType.TYPE_MASK_VARIATION
+        return v != InputType.TYPE_TEXT_VARIATION_PASSWORD &&
+                v != InputType.TYPE_TEXT_VARIATION_VISIBLE_PASSWORD &&
+                v != InputType.TYPE_TEXT_VARIATION_WEB_PASSWORD &&
+                v != InputType.TYPE_TEXT_VARIATION_EMAIL_ADDRESS &&
+                v != InputType.TYPE_TEXT_VARIATION_URI
+    }
+
+    private fun isWordChar(c: Char): Boolean {
+        if (c.isLetter()) return true
+        val t = Character.getType(c)
+        return t == Character.NON_SPACING_MARK.toInt() ||
+                t == Character.COMBINING_SPACING_MARK.toInt()
+    }
+
+    private fun currentWord(): String {
+        val before = currentInputConnection?.getTextBeforeCursor(40, 0)?.toString() ?: return ""
+        return before.takeLastWhile { isWordChar(it) }
+    }
+
+    private fun dict(code: String): List<String> = dicts.getOrPut(code) {
+        try {
+            assets.open("words_$code.txt").bufferedReader().readLines()
+                .map { it.trim() }.filter { it.isNotEmpty() }
+        } catch (e: Exception) {
+            emptyList()
+        }
+    }
+
+    private fun learnedSet(code: String): MutableSet<String> = learned.getOrPut(code) {
+        (prefs.getStringSet("learned_$code", emptySet()) ?: emptySet()).toMutableSet()
+    }
+
+    private fun learn(w: String) {
+        if (w.length < 2 || !suggestionsAllowed()) return
+        val set = learnedSet(lang)
+        if (set.size > 3000) return
+        if (set.add(w)) prefs.edit().putStringSet("learned_$lang", HashSet(set)).apply()
+    }
+
+    private fun suggest(prefix: String): List<String> {
+        val out = LinkedHashSet<String>()
+        for (w in learnedSet(lang)) {
+            if (out.size >= 3) break
+            if (w.length > prefix.length && w.startsWith(prefix, true)) out.add(w)
+        }
+        for (w in dict(lang)) {
+            if (out.size >= 3) break
+            if (w.length > prefix.length && w.startsWith(prefix, true)) out.add(w)
+        }
+        return out.toList()
+    }
+
+    private fun updateSuggestions() {
+        if (!::bar.isInitialized) return
+        bar.removeAllViews()
+        if (!suggestionsAllowed()) return
+        val w = currentWord()
+        if (w.isEmpty()) return
+        suggest(w).forEach { s ->
+            val shown = if (w[0].isUpperCase()) s.replaceFirstChar { it.uppercase() } else s
+            val t = TextView(this)
+            t.text = shown
+            t.gravity = Gravity.CENTER
+            t.textSize = 18f
+            t.maxLines = 1
+            t.setTextColor(TXT)
+            t.background = bg(KEY2)
+            t.layoutParams = LinearLayout.LayoutParams(
+                0, ViewGroup.LayoutParams.MATCH_PARENT, 1f
+            ).apply { setMargins(dp(2), 0, dp(2), dp(2)) }
+            t.setOnClickListener { pick(w, shown) }
+            bar.addView(t)
+        }
+    }
+
+    private fun pick(w: String, s: String) {
+        val ic = currentInputConnection ?: return
+        ic.deleteSurroundingText(w.length, 0)
+        ic.commitText("$s ", 1)
+        learn(s)
+        updateSuggestions()
+    }
+
     // ---------- ইনপুট ----------
 
     private fun type(s: String) {
-        currentInputConnection?.commitText(s, 1)
+        val ic = currentInputConnection ?: return
+        if (s.isNotEmpty() && !isWordChar(s[0])) learn(currentWord())
+        ic.commitText(s, 1)
+        updateSuggestions()
     }
 
     private fun backspace() {
@@ -274,10 +405,12 @@ class KeyboardService : InputMethodService() {
         val sel = ic.getSelectedText(0)
         if (sel.isNullOrEmpty()) ic.deleteSurroundingText(1, 0)
         else ic.commitText("", 1)
+        updateSuggestions()
     }
 
     private fun enter() {
         val ic = currentInputConnection ?: return
+        learn(currentWord())
         val ei = currentInputEditorInfo
         val action = ei?.imeOptions?.and(EditorInfo.IME_MASK_ACTION) ?: EditorInfo.IME_ACTION_NONE
         val noEnter = ((ei?.imeOptions ?: 0) and EditorInfo.IME_FLAG_NO_ENTER_ACTION) != 0
