@@ -125,7 +125,7 @@ class KeyboardService : InputMethodService() {
     // সোলায়মান লিপি ফন্ট: app/src/main/assets/SolaimanLipi.ttf
     private val bnFont: Typeface? by lazy {
         try {
-            Typeface.createFromAsset(assets, "SolaimanLipi.ttf")
+            Typeface.createFromAsset(assets, "fonts/SolaimanLipi.ttf")
         } catch (e: Exception) {
             null
         }
