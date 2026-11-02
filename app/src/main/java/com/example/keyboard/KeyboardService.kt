@@ -46,7 +46,7 @@ private val enS = enN.map { row ->
 
 private val LANGS = linkedMapOf(
     "en" to Lang(
-        "English", "123", enN, enS, r("0 1 2 3 4 5 6 7 8 9")
+        "English", "123", enN, enS, r("1 2 3 4 5 6 7 8 9 0")
     ),
     "bn" to Lang(
         "বাংলা", "১২৩",
@@ -61,7 +61,7 @@ private val LANGS = linkedMapOf(
             r("⇧ ৌ শ ষ স হ ং ঃ ঁ ⌫"),
             r("ড় ঢ় য় ৎ ্ ।")
         ),
-        r("০ ১ ২ ৩ ৪ ৫ ৬ ৭ ৮ ৯")
+        r("১ ২ ৩ ৪ ৫ ৬ ৭ ৮ ৯ ০")
     ),
     "ar" to Lang(
         "العربية", "١٢٣",
@@ -75,7 +75,7 @@ private val LANGS = linkedMapOf(
             r("َ ُ ِ ً ٌ ٍ ّ ْ ـ"),
             r("⇧ أ إ آ پ چ گ ژ ⌫")
         ),
-        r("٠ ١ ٢ ٣ ٤ ٥ ٦ ٧ ٨ ٩")
+        r(" ١ ٢ ٣ ٤ ٥ ٦ ٧ ٨ ٩ ٠")
     )
 )
 
