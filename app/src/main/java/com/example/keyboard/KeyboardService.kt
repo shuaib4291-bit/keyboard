@@ -424,28 +424,31 @@ class KeyboardService : InputMethodService() {
         updateSuggestions()
     }
 
-        private fun enter() {
+           private fun enter() {
         val ic = currentInputConnection ?: return
         learn(currentWord())
-        val ei = currentInputEditorInfo
-        val action = ei?.imeOptions?.and(EditorInfo.IME_MASK_ACTION) ?: EditorInfo.IME_ACTION_NONE
-        val noEnter = ((ei?.imeOptions ?: 0) and EditorInfo.IME_FLAG_NO_ENTER_ACTION) != 0
+        val opts = currentInputEditorInfo?.imeOptions ?: 0
+        val action = opts and EditorInfo.IME_MASK_ACTION
+        val noEnter = (opts and EditorInfo.IME_FLAG_NO_ENTER_ACTION) != 0
         if (!noEnter && action != EditorInfo.IME_ACTION_NONE && action != EditorInfo.IME_ACTION_UNSPECIFIED) {
             ic.performEditorAction(action)
         } else {
-            ic.sendKeyEvent(KeyEvent(KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_ENTER))
-            ic.sendKeyEvent(KeyEvent(KeyEvent.ACTION_UP, KeyEvent.KEYCODE_ENTER))
+            sendDownUpKeyEvents(KeyEvent.KEYCODE_ENTER)
         }
     }
 
     private fun confirm() {
         val ic = currentInputConnection ?: return
         learn(currentWord())
-        val ei = currentInputEditorInfo
-        val action = ei?.imeOptions?.and(EditorInfo.IME_MASK_ACTION) ?: EditorInfo.IME_ACTION_NONE
+        val t = currentInputEditorInfo?.inputType ?: 0
+        val multiLine = (t and InputType.TYPE_TEXT_FLAG_MULTI_LINE) != 0
+        val opts = currentInputEditorInfo?.imeOptions ?: 0
+        val action = opts and EditorInfo.IME_MASK_ACTION
         if (action != EditorInfo.IME_ACTION_NONE && action != EditorInfo.IME_ACTION_UNSPECIFIED) {
             ic.performEditorAction(action)
+        } else if (!multiLine) {
+            sendDownUpKeyEvents(KeyEvent.KEYCODE_ENTER)
         }
         requestHideSelf(0)
     }
-}
+} 
