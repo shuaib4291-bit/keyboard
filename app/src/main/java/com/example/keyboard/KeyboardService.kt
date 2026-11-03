@@ -149,7 +149,7 @@ class KeyboardService : InputMethodService() {
 
     override fun onCreateInputView(): View {
         val screenH = resources.displayMetrics.heightPixels
-        val keysH = maxOf((screenH * 0.20f).toInt(), dp(170))
+        val keysH = maxOf((screenH * 0.15f).toInt(), dp(120))
         root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setBackgroundColor(BG)
@@ -250,7 +250,7 @@ class KeyboardService : InputMethodService() {
         orientation = LinearLayout.HORIZONTAL
         layoutParams = LinearLayout.LayoutParams(
             ViewGroup.LayoutParams.MATCH_PARENT, 0, w
-        ).apply { setMargins(0, dp(2), 0, dp(2)) }
+        ).apply { setMargins(0, dp(1), 0, dp(1)) }
     }
 
     private fun addRow(keys: List<View>) {
@@ -369,7 +369,7 @@ class KeyboardService : InputMethodService() {
                     render()
                 },
                 key(",") { type(",") },
-                key(if (listening) "⏹" else "🎤", 1.2f, fn = true, active = listening, size = 18f) {
+                key(if (listening) "⏹" else "🎤", 1.2f, fn = true, active = listening, size = 15f) {
                     toggleVoice()
                 },
                 key("🌐 " + d.name, 2.4f, fn = true, active = !listening, size = 16f) { nextLang() },
