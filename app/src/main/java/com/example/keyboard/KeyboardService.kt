@@ -274,7 +274,7 @@ class KeyboardService : InputMethodService() {
         weight: Float = 1f,
         fn: Boolean = false,
         active: Boolean = false,
-        size: Float = 20f,
+        size: Float = 16f,
         repeat: Boolean = false,
         action: () -> Unit
     ): TextView {
