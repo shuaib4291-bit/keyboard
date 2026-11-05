@@ -527,7 +527,7 @@ class KeyboardService : InputMethodService() {
         }
         list.forEach { s ->
             val shown = if (w[0].isUpperCase()) s.replaceFirstChar { it.uppercase() } else s
-            bar.addView(chip(shown, 18f) { pick(w, shown) })
+            bar.addView(chip(shown, 115f) { pick(w, shown) })
         }
     }
 
@@ -558,8 +558,8 @@ class KeyboardService : InputMethodService() {
         }
         bar.addView(chip("সব নির্বাচন", 10f) { doSelectAll() })
         bar.addView(chip("কাট", 12f) { doCopy(true) })
-        bar.addView(chip("কপি", 11f) { doCopy(false) })
-        bar.addView(chip("পেস্ট", 15f) { doPaste() })
+        bar.addView(chip("কপি", 12f) { doCopy(false) })
+        bar.addView(chip("পেস্ট", 12f) { doPaste() })
         bar.addView(chip("📋", 13f) {
             showHistory = true
             updateSuggestions()
