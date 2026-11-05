@@ -136,7 +136,9 @@ class KeyboardService : InputMethodService() {
     private val prefs by lazy { getSharedPreferences("kb", MODE_PRIVATE) }
     private val dicts = HashMap<String, List<String>>()
     private val learned = HashMap<String, MutableSet<String>>()
-    private val nextWordMap = HashMap<String, MutableSet<String>>() // ✅ পরের শব্দের জন্য
+    
+    // ✅ পরের শব্দ মনে রাখার ম্যাপ (Next Word Prediction)
+    private val nextWordMap = HashMap<String, MutableSet<String>>()
 
     private fun dp(x: Int) = (x * resources.displayMetrics.density).toInt()
 
@@ -513,6 +515,7 @@ class KeyboardService : InputMethodService() {
         try { recognizer?.destroy() } catch (e: Exception) {}
         recognizer = null
         render()
+        updateSuggestions()
     }
 
     private fun scheduleSilenceStop() {
@@ -571,23 +574,26 @@ class KeyboardService : InputMethodService() {
     }
 
     private fun learn(w: String) {
-        if (w.length < 1 || !suggestionsAllowed()) return
-        
+        if (w.length < 2 || !suggestionsAllowed()) return
         val set = learnedSet(lang)
-        if (set.size <= 3000) {
-            if (set.add(w)) prefs.edit().putStringSet("learned_$lang", HashSet(set)).apply()
-        }
+        if (set.size > 3000) return
+        if (set.add(w)) prefs.edit().putStringSet("learned_$lang", HashSet(set)).apply()
+    }
 
-        // ✅ Next Word Prediction শেখা
+    // ✅ নতুন শব্দের জোড়া সেভ করা
+    private fun learnNextWord(currentWord: String) {
+        if (!suggestionsAllowed() || currentWord.isEmpty()) return
+
         val before = currentInputConnection?.getTextBeforeCursor(100, 0)?.toString() ?: return
         val words = before.trim().split(Regex("\\s+"))
         
         if (words.size >= 2) {
             val prevWord = words[words.size - 2].lowercase()
             val currWord = words[words.size - 1].lowercase()
-            if (currWord.isNotEmpty()) {
+            
+            if (prevWord.isNotEmpty() && currWord.isNotEmpty()) {
                 val nextSet = nextWordMap.getOrPut(prevWord) { mutableSetOf() }
-                if (nextSet.size < 50) {
+                if (nextSet.size < 100) {
                     if (nextSet.add(currWord)) {
                         val savedNext = prefs.getStringSet("next_$lang", emptySet()) ?: emptySet()
                         val newSaved = savedNext.toMutableSet()
@@ -612,6 +618,7 @@ class KeyboardService : InputMethodService() {
         return out.toList()
     }
 
+    // ✅ পরের শব্দ খোঁজা
     private fun getNextWords(prevWord: String): List<String> {
         val out = LinkedHashSet<String>()
         nextWordMap[prevWord]?.let { out.addAll(it) }
@@ -628,6 +635,7 @@ class KeyboardService : InputMethodService() {
     private fun updateSuggestions() {
         if (!::bar.isInitialized) return
         bar.removeAllViews()
+        
         if (isPasswordField()) {
             bar.addView(voiceChip())
             return
@@ -813,7 +821,17 @@ class KeyboardService : InputMethodService() {
     private fun type(s: String) {
         stopVoiceIfActive()
         val ic = currentInputConnection ?: return
-        if (s.isNotEmpty() && !isWordChar(s[0])) learn(currentWord())
+
+        // ✅ স্পেস চাপলে আগের শব্দটি লার্ন করবে
+        if (s == " ") {
+            val word = currentWord()
+            if (word.isNotEmpty()) {
+                learnNextWord(word)
+            }
+        } else if (s.isNotEmpty() && !isWordChar(s[0])) {
+            learn(currentWord())
+        }
+
         if (s.length == 1 && s[0] in '0'..'7' && isPasswordField()) {
             sendDownUpKeyEvents(KeyEvent.KEYCODE_0 + (s[0] - '0'))
         } else {
