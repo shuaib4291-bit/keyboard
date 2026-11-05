@@ -334,7 +334,7 @@ class KeyboardService : InputMethodService() {
         if (num) {
             // ── সংখ্যা মোড: আর আলাদা ডিজিট নয়, শুধু SYM ──
             SYM.forEachIndexed { i, rw ->
-                val ks = rw.map { c -> key(c, size = 16f) { type(c) } }.toMutableList<View>()
+                val ks = rw.map { c -> key(c, size = 18f) { type(c) } }.toMutableList<View>()
                 if (i == 2) ks.add(key("⌫", 1.5f, fn = true, repeat = true) { backspace() })
                 addRow(ks)
             }
