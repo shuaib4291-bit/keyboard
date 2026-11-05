@@ -401,120 +401,124 @@ class KeyboardService : InputMethodService() {
                 PackageManager.PERMISSION_GRANTED
 
     private fun toggleVoice() {
-        if (isPasswordField()) return
+    if (isPasswordField()) return
 
-        // ⏹ চাপলে সম্পূর্ণ বন্ধ
-        if (voiceLoop) {
-            stopVoiceLoop()
-            return
-        }
+    if (voiceLoop) {
+        stopVoiceLoop()
+        return
+    }
 
-        if (!hasMic()) {
-            toast("মাইক্রোফোনের অনুমতি দিন")
-            startActivity(
-                Intent(this, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-            )
-            return
-        }
-        if (!SpeechRecognizer.isRecognitionAvailable(this)) {
-            toast("এই ফোনে ভয়েস টাইপিং সেবা পাওয়া যায়নি")
-            return
-        }
+    if (!hasMic()) {
+        toast("মাইক্রোফোনের অনুমতি দিন")
+        startActivity(
+            Intent(this, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        )
+        return
+    }
+    if (!SpeechRecognizer.isRecognitionAvailable(this)) {
+        toast("এই ফোনে ভয়েস টাইপিং সেবা পাওয়া যায়নি")
+        return
+    }
 
-        val sr = recognizer ?: SpeechRecognizer.createSpeechRecognizer(this).also { recognizer = it }
+    voiceLoop = true
+    listening = true
+    render()
+    updateSuggestions()
+    startFreshRecognizer()
+}
 
-        recognizerIntent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
-            putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
-            putExtra(RecognizerIntent.EXTRA_LANGUAGE, LANGS[lang]!!.voice)
-            putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
-            putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 1)
-            putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS, 3000L)
-            putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS, 3000L)
-            putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_MINIMUM_LENGTH_MILLIS, 5000L)
-        }
+// প্রতিবার একটি নতুন SpeechRecognizer তৈরি করুন
+private fun startFreshRecognizer() {
+    if (!voiceLoop) return
 
-        sr.setRecognitionListener(object : RecognitionListener {
-            override fun onReadyForSpeech(params: Bundle?) {}
-            override fun onBeginningOfSpeech() {}
-            override fun onRmsChanged(rmsdB: Float) {}
-            override fun onBufferReceived(buffer: ByteArray?) {}
-            override fun onEndOfSpeech() {}
-            override fun onEvent(eventType: Int, params: Bundle?) {}
+    // পুরোনোটি ধ্বংস করুন
+    try {
+        recognizer?.destroy()
+    } catch (e: Exception) {}
+    recognizer = null
 
-            override fun onPartialResults(partialResults: Bundle?) {
-                if (!voiceLoop) return
-            }
+    val sr = SpeechRecognizer.createSpeechRecognizer(this)
+    recognizer = sr
 
-            override fun onError(error: Int) {
-                if (!voiceLoop) return
-                when (error) {
-                    SpeechRecognizer.ERROR_NO_MATCH,
-                    SpeechRecognizer.ERROR_SPEECH_TIMEOUT -> {
-                        restartListening()
-                        return
-                    }
-                    SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS -> {
-                        toast("মাইক্রোফোনের অনুমতি দিন")
-                    }
-                    SpeechRecognizer.ERROR_NETWORK,
-                    SpeechRecognizer.ERROR_NETWORK_TIMEOUT -> {
-                        toast("ইন্টারনেট সংযোগ দেখুন")
-                    }
-                    SpeechRecognizer.ERROR_RECOGNIZER_BUSY,
-                    SpeechRecognizer.ERROR_CLIENT -> {
-                        handler.postDelayed({ if (voiceLoop) restartListening() }, 300)
-                        return
-                    }
-                    else -> toast("ভয়েস ত্রুটি ($error)")
+    // ⚠️ EXTRA_SPEECH_INPUT_* প্যারামিটার যোগ করবেন না
+    val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
+        putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
+        putExtra(RecognizerIntent.EXTRA_LANGUAGE, LANGS[lang]!!.voice)
+        putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
+        putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 1)
+        putExtra(RecognizerIntent.EXTRA_CALLING_PACKAGE, packageName)
+    }
+
+    sr.setRecognitionListener(object : RecognitionListener {
+        override fun onReadyForSpeech(params: Bundle?) {}
+        override fun onBeginningOfSpeech() {}
+        override fun onRmsChanged(rmsdB: Float) {}
+        override fun onBufferReceived(buffer: ByteArray?) {}
+        override fun onEndOfSpeech() {}
+        override fun onPartialResults(partialResults: Bundle?) {}
+        override fun onEvent(eventType: Int, params: Bundle?) {}
+
+        override fun onError(error: Int) {
+            if (!voiceLoop) return
+            when (error) {
+                // নীরবতা/কোনো ফলাফল নেই → আবার শুরু করুন
+                SpeechRecognizer.ERROR_NO_MATCH,
+                SpeechRecognizer.ERROR_SPEECH_TIMEOUT -> {
+                    handler.postDelayed({ startFreshRecognizer() }, 200)
                 }
-                stopVoiceLoop()
-            }
-
-            override fun onResults(results: Bundle?) {
-                if (!voiceLoop) return
-                val text = results
-                    ?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
-                    ?.firstOrNull()
-                val now = System.currentTimeMillis()
-                val dup = text == lastVoice && now - lastVoiceAt < 3000
-                if (!text.isNullOrBlank() && !dup) {
-                    lastVoice = text
-                    lastVoiceAt = now
-                    currentInputConnection?.commitText("$text ", 1)
-                    updateSuggestions()
+                // সেশন এখনও শেষ হয়নি, একটু অপেক্ষা করুন
+                SpeechRecognizer.ERROR_RECOGNIZER_BUSY -> {
+                    handler.postDelayed({ startFreshRecognizer() }, 500)
                 }
-                restartListening()
+                // cancel() এর কারণে ERROR_CLIENT আসলে লুপ চালিয়ে যান, বন্ধ করবেন না
+                SpeechRecognizer.ERROR_CLIENT -> {
+                    if (voiceLoop) handler.postDelayed({ startFreshRecognizer() }, 200)
+                }
+                else -> {
+                    // অন্যান্য ত্রুটি (অনুমতি, নেটওয়ার্ক) → লুপ বন্ধ করুন
+                    stopVoiceLoop()
+                }
             }
-        })
+        }
 
-        voiceLoop = true
-        listening = true
-        render()
-        updateSuggestions()
-        sr.startListening(recognizerIntent)
-    }
-
-    private fun restartListening() {
-        if (!voiceLoop) return
-        val sr = recognizer ?: return
-        handler.postDelayed({
-            if (!voiceLoop) return@postDelayed
-            try {
-                sr.cancel()
-                sr.startListening(recognizerIntent)
-            } catch (e: Exception) {
-                stopVoiceLoop()
+        override fun onResults(results: Bundle?) {
+            if (!voiceLoop) return
+            val text = results
+                ?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
+                ?.firstOrNull()
+            val now = System.currentTimeMillis()
+            val dup = text == lastVoice && now - lastVoiceAt < 3000
+            if (!text.isNullOrBlank() && !dup) {
+                lastVoice = text
+                lastVoiceAt = now
+                currentInputConnection?.commitText("$text ", 1)
+                updateSuggestions()
             }
-        }, 250)
-    }
+            // ✅ মূল পরিবর্তন: আগে ধ্বংস করুন, তারপর নতুন তৈরি করুন
+            handler.postDelayed({ startFreshRecognizer() }, 150)
+        }
+    })
 
-    private fun stopVoiceLoop() {
-        voiceLoop = false
-        listening = false
-        try { recognizer?.stopListening() } catch (e: Exception) {}
-        render()
-        updateSuggestions()
+    try {
+        sr.startListening(intent)
+    } catch (e: Exception) {
+        stopVoiceLoop()
     }
+}
+
+private fun stopVoiceLoop() {
+    voiceLoop = false
+    listening = false
+    try {
+        recognizer?.stopListening()
+    } catch (e: Exception) {}
+    try {
+        recognizer?.destroy()
+    } catch (e: Exception) {}
+    recognizer = null
+    render()
+    updateSuggestions()
+}
 
     // ---------- শব্দ সাজেশন ----------
 
