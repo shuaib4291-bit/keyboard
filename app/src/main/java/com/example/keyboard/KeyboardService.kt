@@ -137,8 +137,11 @@ class KeyboardService : InputMethodService() {
     private val dicts = HashMap<String, List<String>>()
     private val learned = HashMap<String, MutableSet<String>>()
     
-    // ✅ পরের শব্দ মনে রাখার ম্যাপ (Next Word Prediction)
+    // ✅ পরের শব্দ মনে রাখার ম্যাপ
     private val nextWordMap = HashMap<String, MutableSet<String>>()
+    
+    // ✅ স্পেস চাপার আগের শব্দ মনে রাখার ভেরিয়েবল
+    private var lastTypedWord = ""
 
     private fun dp(x: Int) = (x * resources.displayMetrics.density).toInt()
 
@@ -188,6 +191,7 @@ class KeyboardService : InputMethodService() {
         num = false
         listening = false
         showHistory = false
+        lastTypedWord = ""
         primaryText()?.let { addHistory(it) }
 
         val t = info?.inputType ?: 0
@@ -341,9 +345,8 @@ class KeyboardService : InputMethodService() {
         val d = LANGS[lang]!!
 
         if (num) {
-            // সংখ্যা মোড: শুধু SYM
             SYM.forEachIndexed { i, rw ->
-                val ks = rw.map { c -> key(c, size = 19f) { type(c) } }.toMutableList<View>()
+                val ks = rw.map { c -> key(c, size = 16f) { type(c) } }.toMutableList<View>()
                 if (i == 2) ks.add(key("⌫", 1.5f, fn = true, repeat = true) { backspace() })
                 addRow(ks)
             }
@@ -355,13 +358,12 @@ class KeyboardService : InputMethodService() {
                     key("space", 2.0f, size = 10f) { type(" ") },
                     key(".") { type(".") },
                     key("↵", 1.5f, fn = true) { enter() },
-                    key("✓", 1.5f, fn = true, size = 16f) { confirm() }
+                    key("✓", 1.5f, fn = true, size = 19f) { confirm() }
                 )
             )
             return
         }
 
-        // সাধারণ মোড: প্রথম সারিতেই সংখ্যা
         addRow(d.digits.map { c -> key(c, size = 14f) { type(c) } })
 
         (if (shift) d.s else d.n).forEach { rw ->
@@ -451,9 +453,7 @@ class KeyboardService : InputMethodService() {
 
         sr.setRecognitionListener(object : RecognitionListener {
             override fun onReadyForSpeech(params: Bundle?) {}
-            override fun onBeginningOfSpeech() {
-                cancelSilenceTimer()
-            }
+            override fun onBeginningOfSpeech() { cancelSilenceTimer() }
             override fun onRmsChanged(rmsdB: Float) {}
             override fun onBufferReceived(buffer: ByteArray?) {}
             override fun onEndOfSpeech() {}
@@ -580,29 +580,23 @@ class KeyboardService : InputMethodService() {
         if (set.add(w)) prefs.edit().putStringSet("learned_$lang", HashSet(set)).apply()
     }
 
-    // ✅ নতুন শব্দের জোড়া সেভ করা
-    private fun learnNextWord(currentWord: String) {
-        if (!suggestionsAllowed() || currentWord.isEmpty()) return
-
-        val before = currentInputConnection?.getTextBeforeCursor(100, 0)?.toString() ?: return
-        val words = before.trim().split(Regex("\\s+"))
+    // ✅ স্পেস চাপার ঠিক পরের শব্দটি সেভ করা
+    private fun saveNextWord(nextWord: String) {
+        if (!suggestionsAllowed() || lastTypedWord.isEmpty() || nextWord.isEmpty()) return
         
-        if (words.size >= 2) {
-            val prevWord = words[words.size - 2].lowercase()
-            val currWord = words[words.size - 1].lowercase()
-            
-            if (prevWord.isNotEmpty() && currWord.isNotEmpty()) {
-                val nextSet = nextWordMap.getOrPut(prevWord) { mutableSetOf() }
-                if (nextSet.size < 100) {
-                    if (nextSet.add(currWord)) {
-                        val savedNext = prefs.getStringSet("next_$lang", emptySet()) ?: emptySet()
-                        val newSaved = savedNext.toMutableSet()
-                        newSaved.add("$prevWord:$currWord")
-                        prefs.edit().putStringSet("next_$lang", newSaved).apply()
-                    }
-                }
+        val prevWord = lastTypedWord.lowercase()
+        val currWord = nextWord.lowercase()
+        
+        val nextSet = nextWordMap.getOrPut(prevWord) { mutableSetOf() }
+        if (nextSet.size < 100) {
+            if (nextSet.add(currWord)) {
+                val savedNext = prefs.getStringSet("next_$lang", emptySet()) ?: emptySet()
+                val newSaved = savedNext.toMutableSet()
+                newSaved.add("$prevWord:$currWord")
+                prefs.edit().putStringSet("next_$lang", newSaved).apply()
             }
         }
+        lastTypedWord = "" // কাজ শেষ, রিসেট
     }
 
     private fun suggest(prefix: String): List<String> {
@@ -618,7 +612,6 @@ class KeyboardService : InputMethodService() {
         return out.toList()
     }
 
-    // ✅ পরের শব্দ খোঁজা
     private fun getNextWords(prevWord: String): List<String> {
         val out = LinkedHashSet<String>()
         nextWordMap[prevWord]?.let { out.addAll(it) }
@@ -822,11 +815,11 @@ class KeyboardService : InputMethodService() {
         stopVoiceIfActive()
         val ic = currentInputConnection ?: return
 
-        // ✅ স্পেস চাপলে আগের শব্দটি লার্ন করবে
+        // ✅ স্পেস চাপার আগের শব্দটি মনে রাখা
         if (s == " ") {
             val word = currentWord()
             if (word.isNotEmpty()) {
-                learnNextWord(word)
+                lastTypedWord = word
             }
         } else if (s.isNotEmpty() && !isWordChar(s[0])) {
             learn(currentWord())
@@ -837,6 +830,22 @@ class KeyboardService : InputMethodService() {
         } else {
             ic.commitText(s, 1)
         }
+
+        // ✅ নতুন শব্দ শেষ করে স্পেস দিলে সেটা সেভ করা
+        if (s == " ") {
+            val wordAfterSpace = currentWord() // স্পেস দেওয়ার পর নতুন শব্দ
+            // এখানে wordAfterSpace খালি থাকবে কারণ সদ্য স্পেস দেওয়া হয়েছে
+            // তাই আমরা এই লজিকটি updateSuggestions এ হ্যান্ডেল করব
+        }
+
+        // ✅ নতুন শব্দ টাইপ হওয়া শেষ হলে (স্পেস বা পাংচুয়েশন দিয়ে) সেভ করা
+        if (lastTypedWord.isNotEmpty() && !isWordChar(s[0])) {
+            val currentW = currentWord()
+            if (currentW.isNotEmpty()) {
+                saveNextWord(currentW)
+            }
+        }
+
         updateSuggestions()
     }
 
