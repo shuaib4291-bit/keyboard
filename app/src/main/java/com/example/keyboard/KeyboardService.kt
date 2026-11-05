@@ -607,7 +607,7 @@ class KeyboardService : InputMethodService() {
         }
         list.forEach { s ->
             val shown = if (w[0].isUpperCase()) s.replaceFirstChar { it.uppercase() } else s
-            bar.addView(chip(shown, 115f) { pick(w, shown) })
+            bar.addView(chip(shown, 14f) { pick(w, shown) })
         }
         bar.addView(voiceChip())
     }
