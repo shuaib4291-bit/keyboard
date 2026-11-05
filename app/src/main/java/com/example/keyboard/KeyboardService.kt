@@ -115,7 +115,7 @@ class KeyboardService : InputMethodService() {
     private var lastVoice = ""
     private var lastVoiceAt = 0L
     private var voiceLoop = false
-    private var recognizerIntent: Intent? = null
+    private var silenceTimer: Runnable? = null   // ✅ নীরবতা টাইমার
 
     // কপি হিস্টরি
     private val history = ArrayList<String>()
@@ -220,6 +220,7 @@ class KeyboardService : InputMethodService() {
 
     override fun onFinishInputView(finishingInput: Boolean) {
         stopRepeat()
+        cancelSilenceTimer()
         voiceLoop = false
         recognizer?.cancel()
         listening = false
@@ -231,6 +232,7 @@ class KeyboardService : InputMethodService() {
             clipboard().removePrimaryClipChangedListener(clipListener)
         } catch (e: Exception) {
         }
+        cancelSilenceTimer()
         voiceLoop = false
         recognizer?.destroy()
         recognizer = null
@@ -336,7 +338,7 @@ class KeyboardService : InputMethodService() {
         val d = LANGS[lang]!!
 
         if (num) {
-            // ── সংখ্যা মোড: আর আলাদা ডিজিট নয়, শুধু SYM ──
+            // সংখ্যা মোড: শুধু SYM
             SYM.forEachIndexed { i, rw ->
                 val ks = rw.map { c -> key(c, size = 19f) { type(c) } }.toMutableList<View>()
                 if (i == 2) ks.add(key("⌫", 1.5f, fn = true, repeat = true) { backspace() })
@@ -356,7 +358,7 @@ class KeyboardService : InputMethodService() {
             return
         }
 
-        // ── সাধারণ মোড: প্রথম সারিতেই সংখ্যা ──
+        // সাধারণ মোড: প্রথম সারিতেই সংখ্যা
         addRow(d.digits.map { c -> key(c, size = 14f) { type(c) } })
 
         (if (shift) d.s else d.n).forEach { rw ->
@@ -378,7 +380,6 @@ class KeyboardService : InputMethodService() {
             })
         }
 
-        // নিচের সারি — ভয়েস উপরে ডান কোণায়
         val dot = if (lang == "bn") "।" else "."
         addRow(
             listOf(
@@ -401,124 +402,137 @@ class KeyboardService : InputMethodService() {
                 PackageManager.PERMISSION_GRANTED
 
     private fun toggleVoice() {
-    if (isPasswordField()) return
+        if (isPasswordField()) return
 
-    if (voiceLoop) {
-        stopVoiceLoop()
-        return
-    }
-
-    if (!hasMic()) {
-        toast("মাইক্রোফোনের অনুমতি দিন")
-        startActivity(
-            Intent(this, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-        )
-        return
-    }
-    if (!SpeechRecognizer.isRecognitionAvailable(this)) {
-        toast("এই ফোনে ভয়েস টাইপিং সেবা পাওয়া যায়নি")
-        return
-    }
-
-    voiceLoop = true
-    listening = true
-    render()
-    updateSuggestions()
-    startFreshRecognizer()
-}
-
-// প্রতিবার একটি নতুন SpeechRecognizer তৈরি করুন
-private fun startFreshRecognizer() {
-    if (!voiceLoop) return
-
-    // পুরোনোটি ধ্বংস করুন
-    try {
-        recognizer?.destroy()
-    } catch (e: Exception) {}
-    recognizer = null
-
-    val sr = SpeechRecognizer.createSpeechRecognizer(this)
-    recognizer = sr
-
-    // ⚠️ EXTRA_SPEECH_INPUT_* প্যারামিটার যোগ করবেন না
-    val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
-        putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
-        putExtra(RecognizerIntent.EXTRA_LANGUAGE, LANGS[lang]!!.voice)
-        putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
-        putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 1)
-        putExtra(RecognizerIntent.EXTRA_CALLING_PACKAGE, packageName)
-    }
-
-    sr.setRecognitionListener(object : RecognitionListener {
-        override fun onReadyForSpeech(params: Bundle?) {}
-        override fun onBeginningOfSpeech() {}
-        override fun onRmsChanged(rmsdB: Float) {}
-        override fun onBufferReceived(buffer: ByteArray?) {}
-        override fun onEndOfSpeech() {}
-        override fun onPartialResults(partialResults: Bundle?) {}
-        override fun onEvent(eventType: Int, params: Bundle?) {}
-
-        override fun onError(error: Int) {
-            if (!voiceLoop) return
-            when (error) {
-                // নীরবতা/কোনো ফলাফল নেই → আবার শুরু করুন
-                SpeechRecognizer.ERROR_NO_MATCH,
-                SpeechRecognizer.ERROR_SPEECH_TIMEOUT -> {
-                    handler.postDelayed({ startFreshRecognizer() }, 200)
-                }
-                // সেশন এখনও শেষ হয়নি, একটু অপেক্ষা করুন
-                SpeechRecognizer.ERROR_RECOGNIZER_BUSY -> {
-                    handler.postDelayed({ startFreshRecognizer() }, 500)
-                }
-                // cancel() এর কারণে ERROR_CLIENT আসলে লুপ চালিয়ে যান, বন্ধ করবেন না
-                SpeechRecognizer.ERROR_CLIENT -> {
-                    if (voiceLoop) handler.postDelayed({ startFreshRecognizer() }, 200)
-                }
-                else -> {
-                    // অন্যান্য ত্রুটি (অনুমতি, নেটওয়ার্ক) → লুপ বন্ধ করুন
-                    stopVoiceLoop()
-                }
-            }
+        if (voiceLoop) {
+            stopVoiceLoop()
+            return
         }
 
-        override fun onResults(results: Bundle?) {
-            if (!voiceLoop) return
-            val text = results
-                ?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
-                ?.firstOrNull()
-            val now = System.currentTimeMillis()
-            val dup = text == lastVoice && now - lastVoiceAt < 3000
-            if (!text.isNullOrBlank() && !dup) {
-                lastVoice = text
-                lastVoiceAt = now
-                currentInputConnection?.commitText("$text ", 1)
-                updateSuggestions()
-            }
-            // ✅ মূল পরিবর্তন: আগে ধ্বংস করুন, তারপর নতুন তৈরি করুন
-            handler.postDelayed({ startFreshRecognizer() }, 150)
+        if (!hasMic()) {
+            toast("মাইক্রোফোনের অনুমতি দিন")
+            startActivity(
+                Intent(this, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            )
+            return
         }
-    })
+        if (!SpeechRecognizer.isRecognitionAvailable(this)) {
+            toast("এই ফোনে ভয়েস টাইপিং সেবা পাওয়া যায়নি")
+            return
+        }
 
-    try {
-        sr.startListening(intent)
-    } catch (e: Exception) {
-        stopVoiceLoop()
+        voiceLoop = true
+        listening = true
+        render()
+        updateSuggestions()
+        startFreshRecognizer()
+        scheduleSilenceStop()   // ✅ শুরুতে ১০ সেকেন্ড কাউন্ট
     }
-}
 
-private fun stopVoiceLoop() {
-    voiceLoop = false
-    listening = false
-    try {
-        recognizer?.stopListening()
-    } catch (e: Exception) {}
-    try {
-        recognizer?.destroy()
-    } catch (e: Exception) {}
-    recognizer = null
-    render()
-    updateSuggestions()
-}
+    // প্রতিবার নতুন SpeechRecognizer তৈরি
+    private fun startFreshRecognizer() {
+        if (!voiceLoop) return
+
+        try { recognizer?.destroy() } catch (e: Exception) {}
+        recognizer = null
+
+        val sr = SpeechRecognizer.createSpeechRecognizer(this)
+        recognizer = sr
+
+        val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
+            putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
+            putExtra(RecognizerIntent.EXTRA_LANGUAGE, LANGS[lang]!!.voice)
+            putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
+            putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 1)
+            putExtra(RecognizerIntent.EXTRA_CALLING_PACKAGE, packageName)
+        }
+
+        sr.setRecognitionListener(object : RecognitionListener {
+            override fun onReadyForSpeech(params: Bundle?) {}
+            override fun onBeginningOfSpeech() {
+                cancelSilenceTimer()   // ✅ কথা শুরু → টাইমার বাতিল
+            }
+            override fun onRmsChanged(rmsdB: Float) {}
+            override fun onBufferReceived(buffer: ByteArray?) {}
+            override fun onEndOfSpeech() {}
+            override fun onPartialResults(partialResults: Bundle?) {}
+            override fun onEvent(eventType: Int, params: Bundle?) {}
+
+            override fun onError(error: Int) {
+                if (!voiceLoop) return
+                when (error) {
+                    SpeechRecognizer.ERROR_NO_MATCH,
+                    SpeechRecognizer.ERROR_SPEECH_TIMEOUT -> {
+                        handler.postDelayed({ startFreshRecognizer() }, 200)
+                        scheduleSilenceStop()
+                    }
+                    SpeechRecognizer.ERROR_RECOGNIZER_BUSY -> {
+                        handler.postDelayed({ startFreshRecognizer() }, 500)
+                        scheduleSilenceStop()
+                    }
+                    SpeechRecognizer.ERROR_CLIENT -> {
+                        if (voiceLoop) {
+                            handler.postDelayed({ startFreshRecognizer() }, 200)
+                            scheduleSilenceStop()
+                        }
+                    }
+                    else -> stopVoiceLoop()
+                }
+            }
+
+            override fun onResults(results: Bundle?) {
+                if (!voiceLoop) return
+                val text = results
+                    ?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
+                    ?.firstOrNull()
+                val now = System.currentTimeMillis()
+                val dup = text == lastVoice && now - lastVoiceAt < 3000
+                if (!text.isNullOrBlank() && !dup) {
+                    lastVoice = text
+                    lastVoiceAt = now
+                    currentInputConnection?.commitText("$text ", 1)
+                    updateSuggestions()
+                }
+                handler.postDelayed({ startFreshRecognizer() }, 150)
+                scheduleSilenceStop()
+            }
+        })
+
+        try {
+            sr.startListening(intent)
+        } catch (e: Exception) {
+            stopVoiceLoop()
+        }
+    }
+
+    private fun stopVoiceLoop() {
+        cancelSilenceTimer()
+        voiceLoop = false
+        listening = false
+        try { recognizer?.stopListening() } catch (e: Exception) {}
+        try { recognizer?.destroy() } catch (e: Exception) {}
+        recognizer = null
+        render()
+        updateSuggestions()
+    }
+
+    // ✅ ১০ সেকেন্ড নীরবতা টাইমার
+    private fun scheduleSilenceStop() {
+        cancelSilenceTimer()
+        val r = Runnable {
+            if (voiceLoop) {
+                toast("১০ সেকেন্ড নীরবতা — ভয়েস বন্ধ")
+                stopVoiceLoop()
+            }
+        }
+        silenceTimer = r
+        handler.postDelayed(r, 10_000L)
+    }
+
+    private fun cancelSilenceTimer() {
+        silenceTimer?.let { handler.removeCallbacks(it) }
+        silenceTimer = null
+    }
 
     // ---------- শব্দ সাজেশন ----------
 
@@ -741,7 +755,13 @@ private fun stopVoiceLoop() {
         }
     }
 
+    // ✅ যেকোনো কী চাপলে ভয়েস বন্ধ
+    private fun stopVoiceIfActive() {
+        if (voiceLoop) stopVoiceLoop()
+    }
+
     private fun type(s: String) {
+        stopVoiceIfActive()
         val ic = currentInputConnection ?: return
         if (s.isNotEmpty() && !isWordChar(s[0])) learn(currentWord())
         if (s.length == 1 && s[0] in '0'..'7' && isPasswordField()) {
@@ -753,6 +773,7 @@ private fun stopVoiceLoop() {
     }
 
     private fun backspace() {
+        stopVoiceIfActive()
         val ic = currentInputConnection ?: return
         if (isPasswordField()) {
             sendDownUpKeyEvents(KeyEvent.KEYCODE_DEL)
@@ -765,6 +786,7 @@ private fun stopVoiceLoop() {
     }
 
     private fun enter() {
+        stopVoiceIfActive()
         val ic = currentInputConnection ?: return
         learn(currentWord())
         val opts = currentInputEditorInfo?.imeOptions ?: 0
@@ -778,6 +800,7 @@ private fun stopVoiceLoop() {
     }
 
     private fun confirm() {
+        stopVoiceIfActive()
         val ic = currentInputConnection ?: return
         learn(currentWord())
         val t = currentInputEditorInfo?.inputType ?: 0
