@@ -122,7 +122,7 @@ class KeyboardService : InputMethodService() {
         primaryText()?.let { addHistory(it) }
     }
 
-    // সোলায়মান লিপি ফন্ট: app/src/main/assets/SolaimanLipi.ttf
+    // সোলায়মান লিপি ফন্ট
     private val bnFont: Typeface? by lazy {
         try {
             Typeface.createFromAsset(assets, "fonts/SolaimanLipi.ttf")
@@ -149,7 +149,6 @@ class KeyboardService : InputMethodService() {
 
     override fun onCreateInputView(): View {
         val screenH = resources.displayMetrics.heightPixels
-        // ৫ সারি কী + বার → উচ্চতা বাড়ানো হলো
         val keysH = maxOf((screenH * 0.13f).toInt(), dp(120))
         root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
@@ -333,10 +332,9 @@ class KeyboardService : InputMethodService() {
         val d = LANGS[lang]!!
 
         if (num) {
-            // ── সংখ্যা মোড: বড় সংখ্যা-প্যাড ──
-            addRow(d.digits.map { c -> key(c, size = 18f) { type(c) } })
+            // ── সংখ্যা মোড: আর আলাদা ডিজিট নয়, শুধু SYM ──
             SYM.forEachIndexed { i, rw ->
-                val ks = rw.map { c -> key(c) { type(c) } }.toMutableList<View>()
+                val ks = rw.map { c -> key(c, size = 16f) { type(c) } }.toMutableList<View>()
                 if (i == 2) ks.add(key("⌫", 1.5f, fn = true, repeat = true) { backspace() })
                 addRow(ks)
             }
@@ -344,7 +342,6 @@ class KeyboardService : InputMethodService() {
                 listOf(
                     key("ABC", 1.5f, fn = true) { num = false; render() },
                     key(",") { type(",") },
-                    key("🎤", 1.5f, fn = true, size = 12f) { toggleVoice() },
                     key("🌐 " + d.name, 2.0f, fn = true, size = 8f) { nextLang() },
                     key("space", 2.0f, size = 10f) { type(" ") },
                     key(".") { type(".") },
@@ -377,15 +374,12 @@ class KeyboardService : InputMethodService() {
             })
         }
 
-        // নিচের সারি
+        // নিচের সারি — ভয়েস বাটন এখানে নেই, উপরে ডান কোণায়
         val dot = if (lang == "bn") "।" else "."
         addRow(
             listOf(
                 key(d.lbl, 1.5f, fn = true) { num = true; render() },
                 key(",") { type(",") },
-                key(if (listening) "⏹" else "🎤", 1.5f, fn = true, active = listening, size = 12f) {
-                    toggleVoice()
-                },
                 key("🌐 " + d.name, 2.0f, fn = true, active = !listening, size = 8f) { nextLang() },
                 key("space", 2.0f, size = 10f) { type(" ") },
                 key(dot) { type(dot) },
@@ -433,6 +427,7 @@ class KeyboardService : InputMethodService() {
             override fun onError(error: Int) {
                 listening = false
                 render()
+                updateSuggestions()
                 when (error) {
                     SpeechRecognizer.ERROR_NO_MATCH,
                     SpeechRecognizer.ERROR_SPEECH_TIMEOUT -> toast("কিছু শোনা যায়নি, আবার চেষ্টা করুন")
@@ -468,6 +463,7 @@ class KeyboardService : InputMethodService() {
         }
         listening = true
         render()
+        updateSuggestions()
         sr.startListening(i)
     }
 
@@ -532,7 +528,10 @@ class KeyboardService : InputMethodService() {
     private fun updateSuggestions() {
         if (!::bar.isInitialized) return
         bar.removeAllViews()
-        if (isPasswordField()) return
+        if (isPasswordField()) {
+            bar.addView(voiceChip())
+            return
+        }
         val w = if (suggestionsAllowed()) currentWord() else ""
         val list = if (w.isEmpty()) emptyList() else suggest(w)
         if (list.isEmpty()) {
@@ -543,6 +542,7 @@ class KeyboardService : InputMethodService() {
             val shown = if (w[0].isUpperCase()) s.replaceFirstChar { it.uppercase() } else s
             bar.addView(chip(shown, 115f) { pick(w, shown) })
         }
+        bar.addView(voiceChip())   // ✅ সাজেশনের ডানেও ভয়েস
     }
 
     // ---------- কপি, পেস্ট ও হিস্টরি ----------
@@ -565,6 +565,22 @@ class KeyboardService : InputMethodService() {
         return t
     }
 
+    // 🎤 উপরে ডান কোণায় ফিক্সড বাটন
+    private fun voiceChip(): TextView {
+        val t = TextView(this)
+        t.text = if (listening) "⏹" else "🎤"
+        t.gravity = Gravity.CENTER
+        t.textSize = 13f
+        t.isSingleLine = true
+        t.setTextColor(if (listening) TXT_ACC else TXT)
+        t.background = bg(if (listening) ACC else KEY2)
+        t.layoutParams = LinearLayout.LayoutParams(
+            dp(42), ViewGroup.LayoutParams.MATCH_PARENT
+        ).apply { setMargins(dp(1), 0, dp(1), dp(1)) }
+        t.setOnClickListener { toggleVoice() }
+        return t
+    }
+
     private fun showTools() {
         if (showHistory) {
             showHistoryRow()
@@ -578,6 +594,8 @@ class KeyboardService : InputMethodService() {
             showHistory = true
             updateSuggestions()
         })
+        // ✅ ভয়েস উপরে ডান কোণায়
+        bar.addView(voiceChip())
     }
 
     private fun showHistoryRow() {
@@ -599,6 +617,7 @@ class KeyboardService : InputMethodService() {
         }
         (close.layoutParams as LinearLayout.LayoutParams).weight = 0.3f
         bar.addView(close)
+        bar.addView(voiceChip())   // ✅ হিস্টরিতেও ডান কোণায় ভয়েস
     }
 
     private fun clipboard() = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
