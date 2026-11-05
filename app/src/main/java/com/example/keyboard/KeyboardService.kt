@@ -159,14 +159,14 @@ class KeyboardService : InputMethodService() {
         }
         bar = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
-            setPadding(dp(3), dp(3), dp(3), 0)
+            setPadding(dp(5), dp(5), dp(5), 0)
             layoutParams = LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, dp(30)
             )
         }
         keysBox = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(dp(3), dp(2), dp(3), dp(3))
+            setPadding(dp(5), dp(3), dp(5), dp(5))
             layoutParams = LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f
             )
@@ -238,7 +238,7 @@ class KeyboardService : InputMethodService() {
 
     private fun shape(c: Int) = GradientDrawable().apply {
         setColor(c)
-        cornerRadius = dp(9).toFloat()
+        cornerRadius = dp(8).toFloat()
     }
 
     private fun bg(c: Int) = StateListDrawable().apply {
@@ -336,7 +336,7 @@ class KeyboardService : InputMethodService() {
             addRow(d.digits.map { c -> key(c) { type(c) } })
             SYM.forEachIndexed { i, rw ->
                 val ks = rw.map { c -> key(c) { type(c) } }.toMutableList<View>()
-                if (i == 2) ks.add(key("⌫", 1.0f, fn = true, repeat = true) { backspace() })
+                if (i == 2) ks.add(key("⌫", 1.5f, fn = true, repeat = true) { backspace() })
                 addRow(ks)
             }
         } else {
@@ -347,7 +347,7 @@ class KeyboardService : InputMethodService() {
                             shift = !shift
                             render()
                         }
-                        "⌫" -> key("⌫", 1.0f, fn = true, repeat = true) { backspace() }
+                        "⌫" -> key("⌫", 1.5f, fn = true, repeat = true) { backspace() }
                         else -> key(label(c)) {
                             type(c)
                             if (shift) {
@@ -364,19 +364,19 @@ class KeyboardService : InputMethodService() {
         val dot = if (lang == "bn") "।" else "."
         addRow(
             listOf(
-                key(if (num) "ABC" else d.lbl, 1.0f, fn = true) {
+                key(if (num) "ABC" else d.lbl, 1.5f, fn = true) {
                     num = !num
                     render()
                 },
                 key(",") { type(",") },
-                key(if (listening) "⏹" else "🎤", 1.0f, fn = true, active = listening, size = 12f) {
+                key(if (listening) "⏹" else "🎤", 1.5f, fn = true, active = listening, size = 16f) {
                     toggleVoice()
                 },
-                key("🌐 " + d.name, 2.0f, fn = true, active = !listening, size = 12f) { nextLang() },
-                key("space", 2.0f, size = 11f) { type(" ") },
+                key("🌐 " + d.name, 2.0f, fn = true, active = !listening, size = 8f) { nextLang() },
+                key("space", 1.5f, size = 11f) { type(" ") },
                 key(dot) { type(dot) },
-                key("↵", 1.1f, fn = true) { enter() },
-                key("✓", 1.1f, fn = true, size = 25f) { confirm() }
+                key("↵", 1.5f, fn = true) { enter() },
+                key("✓", 1.5f, fn = true, size = 16f) { confirm() }
             )
         )
     }
