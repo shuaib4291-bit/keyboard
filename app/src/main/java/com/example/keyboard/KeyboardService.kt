@@ -114,6 +114,8 @@ class KeyboardService : InputMethodService() {
     private var listening = false
     private var lastVoice = ""
     private var lastVoiceAt = 0L
+    private var voiceLoop = false
+    private var recognizerIntent: Intent? = null
 
     // কপি হিস্টরি
     private val history = ArrayList<String>()
@@ -218,6 +220,7 @@ class KeyboardService : InputMethodService() {
 
     override fun onFinishInputView(finishingInput: Boolean) {
         stopRepeat()
+        voiceLoop = false
         recognizer?.cancel()
         listening = false
         super.onFinishInputView(finishingInput)
@@ -228,6 +231,7 @@ class KeyboardService : InputMethodService() {
             clipboard().removePrimaryClipChangedListener(clipListener)
         } catch (e: Exception) {
         }
+        voiceLoop = false
         recognizer?.destroy()
         recognizer = null
         super.onDestroy()
@@ -334,7 +338,7 @@ class KeyboardService : InputMethodService() {
         if (num) {
             // ── সংখ্যা মোড: আর আলাদা ডিজিট নয়, শুধু SYM ──
             SYM.forEachIndexed { i, rw ->
-                val ks = rw.map { c -> key(c, size = 18f) { type(c) } }.toMutableList<View>()
+                val ks = rw.map { c -> key(c, size = 16f) { type(c) } }.toMutableList<View>()
                 if (i == 2) ks.add(key("⌫", 1.5f, fn = true, repeat = true) { backspace() })
                 addRow(ks)
             }
@@ -374,7 +378,7 @@ class KeyboardService : InputMethodService() {
             })
         }
 
-        // নিচের সারি — ভয়েস বাটন এখানে নেই, উপরে ডান কোণায়
+        // নিচের সারি — ভয়েস উপরে ডান কোণায়
         val dot = if (lang == "bn") "।" else "."
         addRow(
             listOf(
@@ -388,7 +392,6 @@ class KeyboardService : InputMethodService() {
             )
         )
     }
-
     // ---------- ভয়েস টাইপিং ----------
 
     private fun toast(s: String) = Toast.makeText(this, s, Toast.LENGTH_SHORT).show()
@@ -399,10 +402,13 @@ class KeyboardService : InputMethodService() {
 
     private fun toggleVoice() {
         if (isPasswordField()) return
-        if (listening) {
-            recognizer?.stopListening()
+
+        // ⏹ চাপলে সম্পূর্ণ বন্ধ
+        if (voiceLoop) {
+            stopVoiceLoop()
             return
         }
+
         if (!hasMic()) {
             toast("মাইক্রোফোনের অনুমতি দিন")
             startActivity(
@@ -414,33 +420,58 @@ class KeyboardService : InputMethodService() {
             toast("এই ফোনে ভয়েস টাইপিং সেবা পাওয়া যায়নি")
             return
         }
+
         val sr = recognizer ?: SpeechRecognizer.createSpeechRecognizer(this).also { recognizer = it }
+
+        recognizerIntent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
+            putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
+            putExtra(RecognizerIntent.EXTRA_LANGUAGE, LANGS[lang]!!.voice)
+            putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
+            putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 1)
+            putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS, 3000L)
+            putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS, 3000L)
+            putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_MINIMUM_LENGTH_MILLIS, 5000L)
+        }
+
         sr.setRecognitionListener(object : RecognitionListener {
             override fun onReadyForSpeech(params: Bundle?) {}
             override fun onBeginningOfSpeech() {}
             override fun onRmsChanged(rmsdB: Float) {}
             override fun onBufferReceived(buffer: ByteArray?) {}
             override fun onEndOfSpeech() {}
-            override fun onPartialResults(partialResults: Bundle?) {}
             override fun onEvent(eventType: Int, params: Bundle?) {}
 
+            override fun onPartialResults(partialResults: Bundle?) {
+                if (!voiceLoop) return
+            }
+
             override fun onError(error: Int) {
-                listening = false
-                render()
-                updateSuggestions()
+                if (!voiceLoop) return
                 when (error) {
                     SpeechRecognizer.ERROR_NO_MATCH,
-                    SpeechRecognizer.ERROR_SPEECH_TIMEOUT -> toast("কিছু শোনা যায়নি, আবার চেষ্টা করুন")
-                    SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS -> toast("মাইক্রোফোনের অনুমতি দিন")
+                    SpeechRecognizer.ERROR_SPEECH_TIMEOUT -> {
+                        restartListening()
+                        return
+                    }
+                    SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS -> {
+                        toast("মাইক্রোফোনের অনুমতি দিন")
+                    }
                     SpeechRecognizer.ERROR_NETWORK,
-                    SpeechRecognizer.ERROR_NETWORK_TIMEOUT -> toast("ইন্টারনেট সংযোগ দেখুন")
+                    SpeechRecognizer.ERROR_NETWORK_TIMEOUT -> {
+                        toast("ইন্টারনেট সংযোগ দেখুন")
+                    }
+                    SpeechRecognizer.ERROR_RECOGNIZER_BUSY,
+                    SpeechRecognizer.ERROR_CLIENT -> {
+                        handler.postDelayed({ if (voiceLoop) restartListening() }, 300)
+                        return
+                    }
                     else -> toast("ভয়েস ত্রুটি ($error)")
                 }
+                stopVoiceLoop()
             }
 
             override fun onResults(results: Bundle?) {
-                if (!listening) return
-                listening = false
+                if (!voiceLoop) return
                 val text = results
                     ?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
                     ?.firstOrNull()
@@ -450,21 +481,39 @@ class KeyboardService : InputMethodService() {
                     lastVoice = text
                     lastVoiceAt = now
                     currentInputConnection?.commitText("$text ", 1)
+                    updateSuggestions()
                 }
-                render()
-                updateSuggestions()
+                restartListening()
             }
         })
-        val i = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
-            putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
-            putExtra(RecognizerIntent.EXTRA_LANGUAGE, LANGS[lang]!!.voice)
-            putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, false)
-            putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 1)
-        }
+
+        voiceLoop = true
         listening = true
         render()
         updateSuggestions()
-        sr.startListening(i)
+        sr.startListening(recognizerIntent)
+    }
+
+    private fun restartListening() {
+        if (!voiceLoop) return
+        val sr = recognizer ?: return
+        handler.postDelayed({
+            if (!voiceLoop) return@postDelayed
+            try {
+                sr.cancel()
+                sr.startListening(recognizerIntent)
+            } catch (e: Exception) {
+                stopVoiceLoop()
+            }
+        }, 250)
+    }
+
+    private fun stopVoiceLoop() {
+        voiceLoop = false
+        listening = false
+        try { recognizer?.stopListening() } catch (e: Exception) {}
+        render()
+        updateSuggestions()
     }
 
     // ---------- শব্দ সাজেশন ----------
@@ -542,7 +591,7 @@ class KeyboardService : InputMethodService() {
             val shown = if (w[0].isUpperCase()) s.replaceFirstChar { it.uppercase() } else s
             bar.addView(chip(shown, 115f) { pick(w, shown) })
         }
-        bar.addView(voiceChip())   // ✅ সাজেশনের ডানেও ভয়েস
+        bar.addView(voiceChip())
     }
 
     // ---------- কপি, পেস্ট ও হিস্টরি ----------
@@ -565,15 +614,14 @@ class KeyboardService : InputMethodService() {
         return t
     }
 
-    // 🎤 উপরে ডান কোণায় ফিক্সড বাটন
     private fun voiceChip(): TextView {
         val t = TextView(this)
-        t.text = if (listening) "⏹" else "🎤"
+        t.text = if (voiceLoop) "⏹" else "🎤"
         t.gravity = Gravity.CENTER
         t.textSize = 13f
         t.isSingleLine = true
-        t.setTextColor(if (listening) TXT_ACC else TXT)
-        t.background = bg(if (listening) ACC else KEY2)
+        t.setTextColor(if (voiceLoop) TXT_ACC else TXT)
+        t.background = bg(if (voiceLoop) ACC else KEY2)
         t.layoutParams = LinearLayout.LayoutParams(
             dp(42), ViewGroup.LayoutParams.MATCH_PARENT
         ).apply { setMargins(dp(1), 0, dp(1), dp(1)) }
@@ -594,7 +642,6 @@ class KeyboardService : InputMethodService() {
             showHistory = true
             updateSuggestions()
         })
-        // ✅ ভয়েস উপরে ডান কোণায়
         bar.addView(voiceChip())
     }
 
@@ -617,7 +664,7 @@ class KeyboardService : InputMethodService() {
         }
         (close.layoutParams as LinearLayout.LayoutParams).weight = 0.3f
         bar.addView(close)
-        bar.addView(voiceChip())   // ✅ হিস্টরিতেও ডান কোণায় ভয়েস
+        bar.addView(voiceChip())
     }
 
     private fun clipboard() = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
