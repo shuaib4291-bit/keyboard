@@ -274,7 +274,7 @@ class KeyboardService : InputMethodService() {
         weight: Float = 1f,
         fn: Boolean = false,
         active: Boolean = false,
-        size: Float = 15f,
+        size: Float = 20f,
         repeat: Boolean = false,
         action: () -> Unit
     ): TextView {
@@ -343,7 +343,7 @@ class KeyboardService : InputMethodService() {
             (if (shift) d.s else d.n).forEach { rw ->
                 addRow(rw.map { c ->
                     when (c) {
-                        "⇧" -> key("⇧", 1.0f, fn = true, active = shift) {
+                        "⇧" -> key("⇧", 1.3f, fn = true, active = shift) {
                             shift = !shift
                             render()
                         }
@@ -369,11 +369,11 @@ class KeyboardService : InputMethodService() {
                     render()
                 },
                 key(",") { type(",") },
-                key(if (listening) "⏹" else "🎤", 1.5f, fn = true, active = listening, size = 16f) {
+                key(if (listening) "⏹" else "🎤", 1.5f, fn = true, active = listening, size = 12f) {
                     toggleVoice()
                 },
                 key("🌐 " + d.name, 2.0f, fn = true, active = !listening, size = 8f) { nextLang() },
-                key("space", 1.5f, size = 11f) { type(" ") },
+                key("space", 2.0f, size = 10f) { type(" ") },
                 key(dot) { type(dot) },
                 key("↵", 1.5f, fn = true) { enter() },
                 key("✓", 1.5f, fn = true, size = 16f) { confirm() }
