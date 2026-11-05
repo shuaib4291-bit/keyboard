@@ -149,24 +149,24 @@ class KeyboardService : InputMethodService() {
 
     override fun onCreateInputView(): View {
         val screenH = resources.displayMetrics.heightPixels
-        val keysH = maxOf((screenH * 0.15f).toInt(), dp(120))
+        val keysH = maxOf((screenH * 0.10f).toInt(), dp(90))
         root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setBackgroundColor(BG)
             layoutParams = ViewGroup.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, keysH + dp(40)
+                ViewGroup.LayoutParams.MATCH_PARENT, keysH + dp(30)
             )
         }
         bar = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
-            setPadding(dp(4), dp(4), dp(4), 0)
+            setPadding(dp(3), dp(3), dp(3), 0)
             layoutParams = LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, dp(40)
+                ViewGroup.LayoutParams.MATCH_PARENT, dp(30)
             )
         }
         keysBox = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(dp(4), dp(3), dp(4), dp(4))
+            setPadding(dp(3), dp(2), dp(3), dp(3))
             layoutParams = LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f
             )
@@ -274,7 +274,7 @@ class KeyboardService : InputMethodService() {
         weight: Float = 1f,
         fn: Boolean = false,
         active: Boolean = false,
-        size: Float = 19f,
+        size: Float = 15f,
         repeat: Boolean = false,
         action: () -> Unit
     ): TextView {
@@ -287,7 +287,7 @@ class KeyboardService : InputMethodService() {
         t.background = bg(if (active) ACC else if (fn) KEY2 else KEY)
         t.layoutParams = LinearLayout.LayoutParams(
             0, ViewGroup.LayoutParams.MATCH_PARENT, weight
-        ).apply { setMargins(dp(2), 0, dp(2), 0) }
+        ).apply { setMargins(dp(1), 0, dp(1), 0) }
         t.setOnTouchListener { v, e ->
             when (e.actionMasked) {
                 MotionEvent.ACTION_DOWN -> {
@@ -302,7 +302,7 @@ class KeyboardService : InputMethodService() {
                             }
                         }
                         repeater = rn
-                        handler.postDelayed(rn, 400)
+                        handler.postDelayed(rn, 350)
                     }
                 }
                 MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
@@ -336,18 +336,18 @@ class KeyboardService : InputMethodService() {
             addRow(d.digits.map { c -> key(c) { type(c) } })
             SYM.forEachIndexed { i, rw ->
                 val ks = rw.map { c -> key(c) { type(c) } }.toMutableList<View>()
-                if (i == 2) ks.add(key("⌫", 1.4f, fn = true, repeat = true) { backspace() })
+                if (i == 2) ks.add(key("⌫", 1.0f, fn = true, repeat = true) { backspace() })
                 addRow(ks)
             }
         } else {
             (if (shift) d.s else d.n).forEach { rw ->
                 addRow(rw.map { c ->
                     when (c) {
-                        "⇧" -> key("⇧", 1.4f, fn = true, active = shift) {
+                        "⇧" -> key("⇧", 1.0f, fn = true, active = shift) {
                             shift = !shift
                             render()
                         }
-                        "⌫" -> key("⌫", 1.4f, fn = true, repeat = true) { backspace() }
+                        "⌫" -> key("⌫", 1.0f, fn = true, repeat = true) { backspace() }
                         else -> key(label(c)) {
                             type(c)
                             if (shift) {
@@ -364,19 +364,19 @@ class KeyboardService : InputMethodService() {
         val dot = if (lang == "bn") "।" else "."
         addRow(
             listOf(
-                key(if (num) "ABC" else d.lbl, 1.3f, fn = true) {
+                key(if (num) "ABC" else d.lbl, 1.0f, fn = true) {
                     num = !num
                     render()
                 },
                 key(",") { type(",") },
-                key(if (listening) "⏹" else "🎤", 1.2f, fn = true, active = listening, size = 15f) {
+                key(if (listening) "⏹" else "🎤", 1.0f, fn = true, active = listening, size = 12f) {
                     toggleVoice()
                 },
-                key("🌐 " + d.name, 2.4f, fn = true, active = !listening, size = 16f) { nextLang() },
-                key("space", 2.0f, size = 14f) { type(" ") },
+                key("🌐 " + d.name, 2.0f, fn = true, active = !listening, size = 12f) { nextLang() },
+                key("space", 2.0f, size = 11f) { type(" ") },
                 key(dot) { type(dot) },
                 key("↵", 1.1f, fn = true) { enter() },
-                key("✓", 1.1f, fn = true, size = 22f) { confirm() }
+                key("✓", 1.1f, fn = true, size = 25f) { confirm() }
             )
         )
     }
@@ -478,7 +478,7 @@ class KeyboardService : InputMethodService() {
     }
 
     private fun currentWord(): String {
-        val before = currentInputConnection?.getTextBeforeCursor(40, 0)?.toString() ?: return ""
+        val before = currentInputConnection?.getTextBeforeCursor(30, 0)?.toString() ?: return ""
         return before.takeLastWhile { isWordChar(it) }
     }
 
@@ -541,12 +541,12 @@ class KeyboardService : InputMethodService() {
         if (lang == "bn") bnFont?.let { t.typeface = it }
         t.isSingleLine = true
         t.ellipsize = android.text.TextUtils.TruncateAt.END
-        t.setPadding(dp(4), 0, dp(4), 0)
+        t.setPadding(dp(3), 0, dp(3), 0)
         t.setTextColor(TXT)
         t.background = bg(KEY2)
         t.layoutParams = LinearLayout.LayoutParams(
             0, ViewGroup.LayoutParams.MATCH_PARENT, 1f
-        ).apply { setMargins(dp(2), 0, dp(2), dp(2)) }
+        ).apply { setMargins(dp(1), 0, dp(1), dp(1)) }
         t.setOnClickListener { action() }
         return t
     }
@@ -556,11 +556,11 @@ class KeyboardService : InputMethodService() {
             showHistoryRow()
             return
         }
-        bar.addView(chip("সব নির্বাচন", 13f) { doSelectAll() })
-        bar.addView(chip("কাট", 15f) { doCopy(true) })
-        bar.addView(chip("কপি", 15f) { doCopy(false) })
+        bar.addView(chip("সব নির্বাচন", 10f) { doSelectAll() })
+        bar.addView(chip("কাট", 12f) { doCopy(true) })
+        bar.addView(chip("কপি", 11f) { doCopy(false) })
         bar.addView(chip("পেস্ট", 15f) { doPaste() })
-        bar.addView(chip("📋", 16f) {
+        bar.addView(chip("📋", 13f) {
             showHistory = true
             updateSuggestions()
         })
@@ -568,22 +568,22 @@ class KeyboardService : InputMethodService() {
 
     private fun showHistoryRow() {
         if (history.isEmpty()) {
-            bar.addView(chip("কপি করা কিছু নেই", 14f) { })
+            bar.addView(chip("কপি করা কিছু নেই", 12f) { })
         } else {
             history.forEach { h ->
                 val one = h.replace("\n", " ")
-                bar.addView(chip(one, 14f) {
+                bar.addView(chip(one, 12f) {
                     currentInputConnection?.commitText(h, 1)
                     showHistory = false
                     updateSuggestions()
                 })
             }
         }
-        val close = chip("✕", 16f) {
+        val close = chip("✕", 12f) {
             showHistory = false
             updateSuggestions()
         }
-        (close.layoutParams as LinearLayout.LayoutParams).weight = 0.4f
+        (close.layoutParams as LinearLayout.LayoutParams).weight = 0.3f
         bar.addView(close)
     }
 
@@ -601,7 +601,7 @@ class KeyboardService : InputMethodService() {
         if (s.isEmpty() || s.length > 2000) return
         history.remove(s)
         history.add(0, s)
-        while (history.size > 4) history.removeAt(history.size - 1)
+        while (history.size > 3) history.removeAt(history.size - 1)
     }
 
     private fun doSelectAll() {
@@ -660,7 +660,7 @@ class KeyboardService : InputMethodService() {
     private fun type(s: String) {
         val ic = currentInputConnection ?: return
         if (s.isNotEmpty() && !isWordChar(s[0])) learn(currentWord())
-        if (s.length == 1 && s[0] in '0'..'9' && isPasswordField()) {
+        if (s.length == 1 && s[0] in '0'..'7' && isPasswordField()) {
             sendDownUpKeyEvents(KeyEvent.KEYCODE_0 + (s[0] - '0'))
         } else {
             ic.commitText(s, 1)
