@@ -136,6 +136,11 @@ class KeyboardService : InputMethodService() {
     private val prefs by lazy { getSharedPreferences("kb", MODE_PRIVATE) }
     private val dicts = HashMap<String, List<String>>()
     private val learned = HashMap<String, MutableSet<String>>()
+private val dicts = HashMap<String, List<String>>()
+private val learned = HashMap<String, MutableSet<String>>()
+
+// ✅ নতুন: পরের শব্দ মনে রাখার জন্য
+private val nextWordMap = HashMap<String, MutableSet<String>>() 
 
     private fun dp(x: Int) = (x * resources.displayMetrics.density).toInt()
 
@@ -573,32 +578,96 @@ class KeyboardService : InputMethodService() {
     }
 
     private fun learn(w: String) {
-        if (w.length < 2 || !suggestionsAllowed()) return
-        val set = learnedSet(lang)
-        if (set.size > 3000) return
+    if (w.length < 1 || !suggestionsAllowed()) return
+    
+    // ১. আগের মতোই নতুন শব্দ শিখুক
+    val set = learnedSet(lang)
+    if (set.size <= 3000) {
         if (set.add(w)) prefs.edit().putStringSet("learned_$lang", HashSet(set)).apply()
     }
 
-    private fun suggest(prefix: String): List<String> {
-        val out = LinkedHashSet<String>()
-        for (w in learnedSet(lang)) {
-            if (out.size >= 3) break
-            if (w.length > prefix.length && w.startsWith(prefix, true)) out.add(w)
+    // ✅ ২. নতুন যোগ: আগের শব্দ এবং বর্তমান শব্দের জোড়া তৈরি করা
+    val before = currentInputConnection?.getTextBeforeCursor(50, 0)?.toString() ?: return
+    val words = before.trim().split(Regex("\\s+"))
+    
+    // যদি অন্তত ২টি শব্দ থাকে (আগের শব্দ এবং বর্তমান শব্দ)
+    if (words.size >= 2) {
+        val prevWord = words[words.size - 2].lowercase()
+        val currWord = words[words.size - 1].lowercase()
+        
+        // প্যারেন্ট শব্দের সাথে বর্তমান শব্দ যোগ করা
+        val nextSet = nextWordMap.getOrPut(prevWord) { mutableSetOf() }
+        if (nextSet.size < 50) { // বেশি বড় না হওয়ার জন্য লিমিট
+            if (nextSet.add(currWord)) {
+                // মেমোরিতে সেভ করা (SharedPreferences এ সেভ করতে চাইলে)
+                val savedNext = prefs.getStringSet("next_$lang", emptySet()) ?: emptySet()
+                val newSaved = savedNext.toMutableSet()
+                newSaved.add("$prevWord:$currWord")
+                prefs.edit().putStringSet("next_$lang", newSaved).apply()
+            }
         }
-        for (w in dict(lang)) {
-            if (out.size >= 3) break
-            if (w.length > prefix.length && w.startsWith(prefix, true)) out.add(w)
-        }
-        return out.toList()
     }
+}
 
     private fun updateSuggestions() {
-        if (!::bar.isInitialized) return
-        bar.removeAllViews()
-        if (isPasswordField()) {
-            bar.addView(voiceChip())
-            return
+    if (!::bar.isInitialized) return
+    bar.removeAllViews()
+    if (isPasswordField()) {
+        bar.addView(voiceChip())
+        return
+    }
+
+    // ✅ নতুন লজিক: ইউজার কি স্পেস দিয়েছে?
+    val before = currentInputConnection?.getTextBeforeCursor(100, 0)?.toString() ?: ""
+    val endsWithSpace = before.isNotEmpty() && before.last().isWhitespace()
+    
+    val w = if (suggestionsAllowed()) currentWord() else ""
+    var list: List<String> = emptyList()
+
+    if (endsWithSpace && suggestionsAllowed()) {
+        // স্পেস দেওয়া হয়েছে -> আগের শব্দটি বের করি
+        val words = before.trim().split(Regex("\\s+"))
+        if (words.isNotEmpty()) {
+            val lastWord = words.last().lowercase()
+            list = getNextWords(lastWord)
         }
+    } else if (w.isNotEmpty()) {
+        // শব্দ লেখা চলছে -> বর্তমান অক্ষর অনুযায়ী শব্দ সাজেশন
+        list = suggest(w)
+    }
+
+    if (list.isEmpty()) {
+        showTools()
+        return
+    }
+
+    list.forEach { s ->
+        // যদি বড় হাতের অক্ষর দিয়ে শুরু হয়, তবে সেটাও মেইনটেইন করি
+        val shown = if (w.isNotEmpty() && w[0].isUpperCase() && !endsWithSpace) s.replaceFirstChar { it.uppercase() } else s
+        bar.addView(chip(shown, 14f) { pick(w, shown) })
+    }
+    bar.addView(voiceChip())
+}
+
+// ✅ নতুন ফাংশন: পরের শব্দ খোঁজা
+private fun getNextWords(prevWord: String): List<String> {
+    val out = LinkedHashSet<String>()
+    
+    // ১. মেমোরি থেকে খোঁজা
+    nextWordMap[prevWord]?.let { out.addAll(it) }
+
+    // ২. SharedPreferences থেকে খোঁজা (সেভ করা থাকলে)
+    val savedNext = prefs.getStringSet("next_$lang", emptySet()) ?: emptySet()
+    for (item in savedNext) {
+        val parts = item.split(":")
+        if (parts.size == 2 && parts[0] == prevWord) {
+            out.add(parts[1])
+        }
+    }
+    
+    // ৩. লোড করা সাজেশন (ম্যাক্স ৩টি)
+    return out.take(3).toList()
+}
         val w = if (suggestionsAllowed()) currentWord() else ""
         val list = if (w.isEmpty()) emptyList() else suggest(w)
         if (list.isEmpty()) {
