@@ -39,7 +39,6 @@ private val ACC = Color.parseColor("#8AB4F8")
 private val TXT = Color.parseColor("#C9D1FF")
 private val TXT_ACC = Color.parseColor("#10192E")
 
-// কপি হিস্টরিতে সর্বোচ্চ কয়টি লেখা থাকবে
 private const val HIST_MAX = 3
 
 private fun r(s: String) = s.split(" ")
@@ -122,14 +121,14 @@ class KeyboardService : InputMethodService() {
     private var voiceLoop = false
     private var silenceTimer: Runnable? = null
 
-    // কপি হিস্টরি (ফোনে সেভ হয়)
+    // কপি হিস্টরি
     private val history = ArrayList<String>()
     private var showHistory = false
     private val clipListener = ClipboardManager.OnPrimaryClipChangedListener {
         primaryText()?.let { addHistory(it) }
     }
 
-    // সোলায়মান লিপি ফন্ট
+    // ফন্ট
     private val bnFont: Typeface? by lazy {
         try {
             Typeface.createFromAsset(assets, "fonts/SolaimanLipi.ttf")
@@ -142,10 +141,13 @@ class KeyboardService : InputMethodService() {
     private val dicts = HashMap<String, List<String>>()
     private val learned = HashMap<String, MutableSet<String>>()
 
-    // পরের শব্দের সাজেশন: আগের শব্দ -> (পরের শব্দ -> সংখ্যা)
+    // পরের শব্দের সাজেশন
     private val nextMaps = HashMap<String, HashMap<String, HashMap<String, Int>>>()
     private val dirtyNext = HashSet<String>()
     private val flushRunnable = Runnable { flushNext() }
+    
+    // ✅ স্পেস চাপার আগের শব্দ মনে রাখার ভেরিয়েবল
+    private var lastTypedWord = ""
 
     private fun dp(x: Int) = (x * resources.displayMetrics.density).toInt()
 
@@ -196,6 +198,7 @@ class KeyboardService : InputMethodService() {
         num = false
         listening = false
         showHistory = false
+        lastTypedWord = ""
         primaryText()?.let { addHistory(it) }
 
         val t = info?.inputType ?: 0
@@ -405,7 +408,6 @@ class KeyboardService : InputMethodService() {
             )
         )
     }
-
     // ---------- ভয়েস টাইপিং ----------
 
     private fun toast(s: String) = Toast.makeText(this, s, Toast.LENGTH_SHORT).show()
@@ -606,10 +608,9 @@ class KeyboardService : InputMethodService() {
     private fun nextMap(code: String): HashMap<String, HashMap<String, Int>> =
         nextMaps.getOrPut(code) {
             val m = HashMap<String, HashMap<String, Int>>()
-            // শুরুর তালিকা (assets/next_xx.txt)
             try {
                 assets.open("next_$code.txt").bufferedReader().readLines().forEach { line ->
-                    val p = line.trim().split(" ")
+                    val p = line.trim().split(Regex("\\s+"))
                     if (p.size >= 2) {
                         val inner = m.getOrPut(p[0]) { HashMap() }
                         for (i in 1 until p.size) {
@@ -619,7 +620,6 @@ class KeyboardService : InputMethodService() {
                 }
             } catch (e: Exception) {
             }
-            // আগে শেখা শব্দ
             try {
                 val o = JSONObject(prefs.getString("nextjson_$code", "{}") ?: "{}")
                 val keys = o.keys()
@@ -652,7 +652,8 @@ class KeyboardService : InputMethodService() {
         inner[n] = (inner[n] ?: 0) + 3
         dirtyNext.add(lang)
         handler.removeCallbacks(flushRunnable)
-        handler.postDelayed(flushRunnable, 4000)
+        // ✅ ১ সেকেন্ড পর সেভ হবে, যাতে বারবার ডিস্কে লেখা না হয়
+        handler.postDelayed(flushRunnable, 1000)
     }
 
     private fun flushNext() {
@@ -669,16 +670,6 @@ class KeyboardService : InputMethodService() {
         dirtyNext.clear()
     }
 
-    // সদ্য লেখা শেষ হওয়া শব্দ ও তার আগের শব্দের জোড়া মনে রাখে
-    private fun recordBigram(afterSpace: Boolean) {
-        if (!suggestionsAllowed()) return
-        var before = currentInputConnection?.getTextBeforeCursor(80, 0)?.toString() ?: return
-        if (afterSpace) before = before.trimEnd()
-        if (before.isEmpty() || !isWordChar(before.last())) return
-        val words = before.split(Regex("[^\\p{L}\\p{M}]+")).filter { it.isNotEmpty() }
-        if (words.size >= 2) addBigram(words[words.size - 2], words[words.size - 1])
-    }
-
     private fun getNextWords(prev: String): List<String> =
         nextMap(lang)[prev.lowercase()]?.entries
             ?.sortedByDescending { it.value }
@@ -691,6 +682,7 @@ class KeyboardService : InputMethodService() {
         bar.removeAllViews()
 
         if (isPasswordField()) {
+            bar.addView(clipChip())
             bar.addView(voiceChip())
             return
         }
@@ -764,7 +756,6 @@ class KeyboardService : InputMethodService() {
         return t
     }
 
-    // সবসময় ডানে থাকা 📋 বাটন, চাপলে কপি হিস্টরি খোলে
     private fun clipChip(): TextView {
         val t = TextView(this)
         t.text = "📋"
@@ -889,7 +880,11 @@ class KeyboardService : InputMethodService() {
         }
         ic.commitText("$s ", 1)
         learn(s)
-        recordBigram(true)
+        // ✅ সাজেশন থেকে শব্দ নিলে সেটাও জোড়া হিসেবে সেভ হবে
+        if (lastTypedWord.isNotEmpty()) {
+            addBigram(lastTypedWord, s)
+            lastTypedWord = ""
+        }
         updateSuggestions()
     }
 
@@ -918,9 +913,13 @@ class KeyboardService : InputMethodService() {
         val ic = currentInputConnection ?: return
         showHistory = false
 
-        // শব্দ শেষ হলে (space বা চিহ্ন দিলে) শব্দ ও শব্দ-জোড়া শেখা
-        if (s.isNotEmpty() && !isWordChar(s[0])) {
-            recordBigram(false)
+        // ✅ স্পেস দেওয়ার আগেই আগের শব্দটা মনে রাখা
+        if (s == " ") {
+            val word = currentWord()
+            if (word.isNotEmpty()) {
+                lastTypedWord = word
+            }
+        } else if (s.isNotEmpty() && !isWordChar(s[0])) {
             learn(currentWord())
         }
 
@@ -929,6 +928,16 @@ class KeyboardService : InputMethodService() {
         } else {
             ic.commitText(s, 1)
         }
+
+        // ✅ নতুন শব্দ শেষ করে স্পেস দিলে সেটা জোড়া হিসেবে সেভ করা
+        if (s == " " && lastTypedWord.isNotEmpty()) {
+            val currWord = currentWord()
+            if (currWord.isNotEmpty() && currWord != lastTypedWord) {
+                addBigram(lastTypedWord, currWord)
+                lastTypedWord = "" // কাজ শেষ, রিসেট
+            }
+        }
+
         updateSuggestions()
     }
 
@@ -948,7 +957,6 @@ class KeyboardService : InputMethodService() {
     private fun enter() {
         stopVoiceIfActive()
         val ic = currentInputConnection ?: return
-        recordBigram(false)
         learn(currentWord())
         val opts = currentInputEditorInfo?.imeOptions ?: 0
         val action = opts and EditorInfo.IME_MASK_ACTION
@@ -963,7 +971,6 @@ class KeyboardService : InputMethodService() {
     private fun confirm() {
         stopVoiceIfActive()
         val ic = currentInputConnection ?: return
-        recordBigram(false)
         learn(currentWord())
         val t = currentInputEditorInfo?.inputType ?: 0
         val multiLine = (t and InputType.TYPE_TEXT_FLAG_MULTI_LINE) != 0
