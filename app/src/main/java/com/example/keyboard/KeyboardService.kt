@@ -638,22 +638,22 @@ class KeyboardService : InputMethodService() {
             m
         }
 
-    private fun addBigram(prev: String, next: String) {
+        private fun addBigram(prev: String, next: String) {
         val p = prev.lowercase()
         val n = next.lowercase()
         if (p.isEmpty() || n.isEmpty()) return
         val m = nextMap(lang)
         if (!m.containsKey(p) && m.size >= 3000) return
         val inner = m.getOrPut(p) { HashMap() }
-        if (!inner.containsKey(n) && inner.size >= 20) {
+        val limit = if (p == "*") 60 else 20
+        if (!inner.containsKey(n) && inner.size >= limit) {
             val low = inner.minByOrNull { it.value }?.key
             if (low != null) inner.remove(low)
         }
         inner[n] = (inner[n] ?: 0) + 3
         dirtyNext.add(lang)
         handler.removeCallbacks(flushRunnable)
-        // ✅ ১ সেকেন্ড পর সেভ হবে, যাতে বারবার ডিস্কে লেখা না হয়
-        handler.postDelayed(flushRunnable, 1000)
+        handler.postDelayed(flushRunnable, 4000)
     }
 
     private fun flushNext() {
@@ -670,13 +670,33 @@ class KeyboardService : InputMethodService() {
         dirtyNext.clear()
     }
 
-    private fun getNextWords(prev: String): List<String> =
-        nextMap(lang)[prev.lowercase()]?.entries
-            ?.sortedByDescending { it.value }
-            ?.take(3)
-            ?.map { it.key }
-            ?: emptyList()
+    // সদ্য লেখা শেষ হওয়া শব্দ মনে রাখে, আর আগের শব্দের সাথে জোড়াও মনে রাখে
+    private fun recordBigram(afterSpace: Boolean) {
+        if (!suggestionsAllowed()) return
+        var before = currentInputConnection?.getTextBeforeCursor(80, 0)?.toString() ?: return
+        if (afterSpace) before = before.trimEnd()
+        if (before.isEmpty() || !isWordChar(before.last())) return
+        val words = before.split(Regex("[^\\p{L}\\p{M}]+")).filter { it.isNotEmpty() }
+        if (words.isEmpty()) return
+        addBigram("*", words.last())
+        if (words.size >= 2) addBigram(words[words.size - 2], words.last())
+    }
 
+    // আগের শব্দের জোড়া থাকলে সেটি, না থাকলে সাধারণ শব্দ
+    private fun getNextWords(prev: String): List<String> {
+        val m = nextMap(lang)
+        val p = prev.lowercase()
+        val out = LinkedHashSet<String>()
+        m[p]?.entries?.sortedByDescending { it.value }?.forEach {
+            if (out.size < 3) out.add(it.key)
+        }
+        if (out.size < 3) {
+            m["*"]?.entries?.sortedByDescending { it.value }?.forEach {
+                if (out.size < 3 && it.key != p) out.add(it.key)
+            }
+        }
+        return out.toList()
+    }
     private fun updateSuggestions() {
         if (!::bar.isInitialized) return
         bar.removeAllViews()
